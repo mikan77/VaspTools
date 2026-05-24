@@ -1,0 +1,153 @@
+"""Workflow helpers for VASP mechanical-property calculations."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+__all__ = [
+    "Calculation",
+    "CalculationRunner",
+    "ElasticFitResult",
+    "ElasticMode",
+    "EOSFitResult",
+    "EOSMode",
+    "EOSPoint",
+    "IncarPolicy",
+    "MechanicalPipeline",
+    "PipelineConfig",
+    "PipelineInputs",
+    "SbatchRunner",
+    "StrainStressPoint",
+    "Submission",
+    "VaspCalculationFactory",
+    "WorkflowMode",
+    "apply_strain",
+    "birch_murnaghan_energy",
+    "check_mechanical_stability",
+    "discover_calculations",
+    "fit_elastic_tensor",
+    "fit_eos",
+    "generate_strain_vectors",
+    "make_stage_incar",
+    "mechanical_properties",
+    "parse_sbatch_job_id",
+    "render_job_script",
+    "scale_structure_to_volume",
+    "strain_matrix_from_voigt",
+    "submit_sbatch",
+    "validate_kspacing_incar",
+]
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import public objects."""
+
+    if name in {"Calculation", "PipelineConfig", "PipelineInputs"}:
+        from .core.models import Calculation, PipelineConfig, PipelineInputs
+
+        exports = {
+            "Calculation": Calculation,
+            "PipelineConfig": PipelineConfig,
+            "PipelineInputs": PipelineInputs,
+        }
+    elif name == "MechanicalPipeline":
+        from .core.pipeline import MechanicalPipeline
+
+        exports = {"MechanicalPipeline": MechanicalPipeline}
+    elif name in {"EOSMode", "ElasticMode", "WorkflowMode"}:
+        from .workflows import ElasticMode, EOSMode, WorkflowMode
+
+        exports = {
+            "ElasticMode": ElasticMode,
+            "EOSMode": EOSMode,
+            "WorkflowMode": WorkflowMode,
+        }
+    elif name == "VaspCalculationFactory":
+        from .core.factory import VaspCalculationFactory
+
+        exports = {"VaspCalculationFactory": VaspCalculationFactory}
+    elif name == "IncarPolicy":
+        from .core.policies import IncarPolicy
+
+        exports = {"IncarPolicy": IncarPolicy}
+    elif name in {"CalculationRunner", "SbatchRunner"}:
+        from .execution.runners import CalculationRunner, SbatchRunner
+
+        exports = {"CalculationRunner": CalculationRunner, "SbatchRunner": SbatchRunner}
+    elif name in {"Submission", "parse_sbatch_job_id", "render_job_script", "submit_sbatch"}:
+        from .io.jobs import Submission, parse_sbatch_job_id, render_job_script, submit_sbatch
+
+        exports = {
+            "Submission": Submission,
+            "parse_sbatch_job_id": parse_sbatch_job_id,
+            "render_job_script": render_job_script,
+            "submit_sbatch": submit_sbatch,
+        }
+    elif name in {"make_stage_incar", "validate_kspacing_incar"}:
+        from .io.incar import make_stage_incar, validate_kspacing_incar
+
+        exports = {
+            "make_stage_incar": make_stage_incar,
+            "validate_kspacing_incar": validate_kspacing_incar,
+        }
+    elif name == "discover_calculations":
+        from .io.discovery import discover_calculations
+
+        exports = {"discover_calculations": discover_calculations}
+    elif name in {
+        "apply_strain",
+        "generate_strain_vectors",
+        "scale_structure_to_volume",
+        "strain_matrix_from_voigt",
+    }:
+        from .structures import (
+            apply_strain,
+            generate_strain_vectors,
+            scale_structure_to_volume,
+            strain_matrix_from_voigt,
+        )
+
+        exports = {
+            "apply_strain": apply_strain,
+            "generate_strain_vectors": generate_strain_vectors,
+            "scale_structure_to_volume": scale_structure_to_volume,
+            "strain_matrix_from_voigt": strain_matrix_from_voigt,
+        }
+    elif name in {"EOSFitResult", "EOSPoint", "birch_murnaghan_energy", "fit_eos"}:
+        from .analysis.eos import EOSFitResult, EOSPoint, birch_murnaghan_energy, fit_eos
+
+        exports = {
+            "EOSFitResult": EOSFitResult,
+            "EOSPoint": EOSPoint,
+            "birch_murnaghan_energy": birch_murnaghan_energy,
+            "fit_eos": fit_eos,
+        }
+    elif name in {
+        "ElasticFitResult",
+        "StrainStressPoint",
+        "check_mechanical_stability",
+        "fit_elastic_tensor",
+        "mechanical_properties",
+    }:
+        from .analysis.elastic import (
+            ElasticFitResult,
+            StrainStressPoint,
+            check_mechanical_stability,
+            fit_elastic_tensor,
+            mechanical_properties,
+        )
+
+        exports = {
+            "ElasticFitResult": ElasticFitResult,
+            "StrainStressPoint": StrainStressPoint,
+            "check_mechanical_stability": check_mechanical_stability,
+            "fit_elastic_tensor": fit_elastic_tensor,
+            "mechanical_properties": mechanical_properties,
+        }
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    value = exports[name]
+    globals()[name] = value
+    return value

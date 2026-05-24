@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments and local settings
+.env
+.venv/
+venv/
+env/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Editors, OS, notebooks
+.DS_Store
+.ipynb_checkpoints/
+Untitled*.ipynb
+
+# VASP outputs and large generated files
+OUTCAR
+OSZICAR
+CONTCAR
+vasprun.xml
+XDATCAR
+EIGENVAL
+CHGCAR
+WAVECAR
+REPORT
+IBZKPT
+PCDAT
+DOSCAR
+PROCAR
+LOCPOT
+AECCAR*
+ELFCAR
+
+# VaspTools generated workflow outputs
+vasptools_metadata.json
+vasptools_summary.json
+reports/
+eos/
+elastic/
+static_only/
+
+# Logs and temporary files
+*.log
+*.tmp
+slurm-*.out
