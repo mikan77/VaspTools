@@ -48,6 +48,22 @@ The API has three workflow modes:
 - allows grid scans over one or multiple tags;
 - preserves all original INCAR parameters not explicitly changed by the workflow.
 
+`clusters` API:
+
+- reads molecular crystals from POSCAR or CIF;
+- builds a padded supercell and identifies finite molecular fragments;
+- generates unique dimers, trimers, tetramers, and arbitrary requested n-mers;
+- uses user-provided center-of-mass cutoffs per n-mer order;
+- writes unique cluster XYZ files, ORCA inputs, CSV statistics, and batches;
+- supports `full_cluster` and dependency-reusing `mbe` output modes;
+- does not generate ghost atoms in this version.
+
+The `molecules` API extracts all molecular fragments from POSCAR/CIF, groups
+identical internal geometries, and finds symmetry-unique molecules using the
+space-group operations. It writes `.xyz` and isolated POSCAR files for every
+geometry and symmetry representative. `fingerprint_tolerance_A`,
+`rmsd_tolerance_A`, and `vacuum_padding_A` are user-configurable.
+
 ## Repository Layout
 
 ```text
@@ -63,6 +79,12 @@ VaspTools/
     eos.py                # EOSMode
     elastic.py            # ElasticMode
     param_scan.py         # ParamScanMode (INCAR parameter scan)
+  clusters/
+    models.py             # n-mer and ORCA configuration/result models
+    generator.py          # POSCAR/CIF molecular-crystal API
+  molecules/
+    models.py             # molecular-extraction result models
+    extractor.py          # geometry and symmetry-unique molecule API
   scripts/
     run_param_scan.py      # CLI for one-structure parameter scan
     run_multi_scan.py      # CLI for many structures (eos/elastic)
@@ -457,6 +479,61 @@ Output CSV contains:
 - parameter columns `param__volume_factor` and `param__strain` where applicable.
 
 ## API Reference
+
+### Molecular-crystal n-mers
+
+```python
+from VaspTools import CrystalNMerGenerator, OrcaConfig
+
+generator = CrystalNMerGenerator.from_file(
+    "/path/to/POSCAR",
+    cutoffs={2: 20.0, 3: 15.0, 4: 8.5},
+    supercell_padding_A=5.0,
+    rmsd_tolerance_A=0.15,
+    orca=OrcaConfig(charge=0, multiplicity=1),
+)
+
+result = generator.generate(
+    "/path/to/nmer_output",
+    modes=("full_cluster", "mbe"),
+    batch_size=5,
+)
+```
+
+`full_cluster` writes one ORCA input per unique full n-mer. `mbe` writes one
+input per unique molecular type and unique cluster type, reusing the same
+objects across different cluster occurrences. Each individual `.inp` contains
+one ORCA job; batch files concatenate several prepared inputs.
+
+If the cell contains two conformations of the same molecule, they receive
+different `molecule_type_id` values (`M000001`, `M000002`). Therefore `A-A`,
+`A-B`, and `B-B` are kept separate; each cluster composition is recorded in
+the CSV `member_type_ids` field.
+
+CSV reports are written under `statistics/`: molecule types and instances,
+cluster types, cluster members and occurrences, per-order summaries, and the
+calculation manifest. `space_group` and symmetry-operation metadata are
+recorded when `SpacegroupAnalyzer` can identify them; geometric RMSD remains
+the final cluster-equivalence criterion.
+
+### Molecular extraction
+
+```python
+from VaspTools import MolecularStructureExtractor
+
+extractor = MolecularStructureExtractor.from_file(
+    "/path/to/POSCAR",
+    fingerprint_tolerance_A=0.05,
+    rmsd_tolerance_A=0.15,
+    vacuum_padding_A=10.0,
+)
+result = extractor.extract("/path/to/molecule_output")
+```
+
+The extractor writes `molecule_instances.csv`, `geometry_types.csv`,
+`symmetry_unique_molecules.csv`, `symmetry_mappings.csv`, and `summary.csv`.
+`G...` identifies a unique internal geometry; `U...` identifies a representative
+of a symmetry orbit in the input unit cell.
 
 ### MechanicalPipeline.from_workdir
 

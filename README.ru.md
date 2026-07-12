@@ -48,6 +48,23 @@ workflow для расчета механических свойств. Осно
 - позволяет сканировать один или несколько тегов `INCAR` по сетке;
 - сохраняет все остальные параметры `INCAR` неизменными.
 
+API `clusters`:
+
+- читает молекулярные кристаллы из POSCAR или CIF;
+- строит supercell с padding и выделяет конечные молекулярные фрагменты;
+- создает уникальные dimers, trimers, tetramers и произвольные `n-mers`;
+- использует заданные пользователем cutoff по центрам масс для каждого порядка;
+- записывает XYZ-кластеры, ORCA inputs, CSV-статистику и batch-файлы;
+- поддерживает режимы `full_cluster` и `mbe` с повторным использованием объектов;
+- ghost atoms в этой версии не создаются.
+
+API `molecules` извлекает из POSCAR/CIF все молекулы исходной ячейки,
+группирует одинаковые внутренние геометрии и определяет симметрично уникальные
+молекулы через операции пространственной группы. Для каждой геометрии и каждого
+симметрично уникального представителя создаются `.xyz` и изолированный POSCAR.
+Параметры `fingerprint_tolerance_A`, `rmsd_tolerance_A` и
+`vacuum_padding_A` задаются пользователем.
+
 ## Структура Репозитория
 
 ```text
@@ -66,6 +83,12 @@ VaspTools/
   analysis/
     eos.py                # Birch-Murnaghan EOS fitting
     elastic.py            # Elastic tensor fitting and mechanical properties
+  clusters/
+    models.py             # модели конфигурации n-mer и ORCA
+    generator.py          # API для POSCAR/CIF молекулярных кристаллов
+  molecules/
+    models.py             # модели результатов извлечения молекул
+    extractor.py          # геометрии и симметрично уникальные молекулы
   io/
     incar.py              # Lightweight INCAR parser/writer and stage rules
     jobs.py               # SLURM job script rendering and sbatch helpers
@@ -459,6 +482,60 @@ python scripts/run_multi_scan.py \
 - `param__volume_factor` и `param__strain` где это применимо.
 
 ## API Reference
+
+### Molecular-crystal n-mers
+
+```python
+from VaspTools import CrystalNMerGenerator, OrcaConfig
+
+generator = CrystalNMerGenerator.from_file(
+    "/path/to/POSCAR",
+    cutoffs={2: 20.0, 3: 15.0, 4: 8.5},
+    supercell_padding_A=5.0,
+    rmsd_tolerance_A=0.15,
+    orca=OrcaConfig(charge=0, multiplicity=1),
+)
+
+result = generator.generate(
+    "/path/to/nmer_output",
+    modes=("full_cluster", "mbe"),
+    batch_size=5,
+)
+```
+
+`full_cluster` записывает один ORCA input на каждый уникальный полный n-mer.
+`mbe` записывает один input на каждый уникальный тип молекулы и кластера,
+переиспользуя их для разных occurrences. Каждый отдельный `.inp` содержит
+один ORCA job; batch-файлы объединяют несколько готовых inputs.
+
+Если в ячейке находятся две конформации одной молекулы, они получают разные
+`molecule_type_id` (`M000001`, `M000002`). Поэтому `A-A`, `A-B` и `B-B` не
+объединяются; состав каждого кластера указан в `member_type_ids` в CSV.
+
+CSV-отчеты записываются в `statistics/`: типы и instances молекул, типы
+кластеров, состав кластеров и occurrences, сводка по каждому порядку и manifest
+расчетов. `space_group` и metadata symmetry operations сохраняются, если
+`SpacegroupAnalyzer` смог определить симметрию; итоговым критерием эквивалентности
+кластеров остается геометрический RMSD.
+
+### Извлечение молекул
+
+```python
+from VaspTools import MolecularStructureExtractor
+
+extractor = MolecularStructureExtractor.from_file(
+    "/path/to/POSCAR",
+    fingerprint_tolerance_A=0.05,
+    rmsd_tolerance_A=0.15,
+    vacuum_padding_A=10.0,
+)
+result = extractor.extract("/path/to/molecule_output")
+```
+
+В `statistics/` записываются `molecule_instances.csv`,
+`geometry_types.csv`, `symmetry_unique_molecules.csv`, `symmetry_mappings.csv`
+и `summary.csv`. `G...` обозначает уникальную внутреннюю геометрию, а `U...`
+— представителя симметричной орбиты в исходной ячейке.
 
 ### MechanicalPipeline.from_workdir
 

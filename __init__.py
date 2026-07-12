@@ -8,6 +8,9 @@ from typing import Any
 __all__ = [
     "Calculation",
     "CalculationRunner",
+    "ClusterOccurrence",
+    "ClusterType",
+    "CrystalNMerGenerator",
     "ElasticFitResult",
     "ElasticMode",
     "EOSFitResult",
@@ -15,6 +18,18 @@ __all__ = [
     "EOSPoint",
     "IncarPolicy",
     "MechanicalPipeline",
+    "GenerationResult",
+    "MoleculeInstance",
+    "MoleculeType",
+    "MolecularStructureExtractor",
+    "MoleculeExtractionConfig",
+    "GeometryType",
+    "ExtractionResult",
+    "MoleculeOccurrence",
+    "SymmetryMapping",
+    "SymmetryUniqueMolecule",
+    "NMerConfig",
+    "OrcaConfig",
     "PipelineConfig",
     "PipelineInputs",
     "ParamScanMode",
@@ -58,6 +73,65 @@ def __getattr__(name: str) -> Any:
         from .core.pipeline import MechanicalPipeline
 
         exports = {"MechanicalPipeline": MechanicalPipeline}
+    elif name in {
+        "ClusterOccurrence",
+        "ClusterType",
+        "CrystalNMerGenerator",
+        "GenerationResult",
+        "MoleculeInstance",
+        "MoleculeType",
+        "NMerConfig",
+        "OrcaConfig",
+    }:
+        from .clusters import (
+            ClusterOccurrence,
+            ClusterType,
+            CrystalNMerGenerator,
+            GenerationResult,
+            MoleculeInstance,
+            MoleculeType,
+            NMerConfig,
+            OrcaConfig,
+        )
+
+        exports = {
+            "ClusterOccurrence": ClusterOccurrence,
+            "ClusterType": ClusterType,
+            "CrystalNMerGenerator": CrystalNMerGenerator,
+            "GenerationResult": GenerationResult,
+            "MoleculeInstance": MoleculeInstance,
+            "MoleculeType": MoleculeType,
+            "NMerConfig": NMerConfig,
+            "OrcaConfig": OrcaConfig,
+        }
+    elif name in {
+        "ExtractionResult",
+        "GeometryType",
+        "MolecularStructureExtractor",
+        "MoleculeExtractionConfig",
+        "MoleculeOccurrence",
+        "SymmetryMapping",
+        "SymmetryUniqueMolecule",
+    }:
+        from .molecules import (
+            ExtractionResult,
+            GeometryType,
+            MolecularStructureExtractor,
+            MoleculeExtractionConfig,
+            MoleculeOccurrence,
+            SymmetryMapping,
+            SymmetryUniqueMolecule,
+        )
+
+        exports = {
+            "ExtractionResult": ExtractionResult,
+            "GeometryType": GeometryType,
+            "MolecularStructureExtractor": MolecularStructureExtractor,
+            "MoleculeExtractionConfig": MoleculeExtractionConfig,
+            "MoleculeOccurrence": MoleculeOccurrence,
+            "SymmetryMapping": SymmetryMapping,
+            "SymmetryUniqueMolecule": SymmetryUniqueMolecule,
+        }
     elif name in {"EOSMode", "ElasticMode", "WorkflowMode"}:
         from .workflows import ElasticMode, EOSMode, WorkflowMode
 
