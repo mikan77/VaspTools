@@ -5,15 +5,16 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from ..analysis.elastic import ElasticFitResult, StrainStressPoint
 from ..analysis.eos import EOSFitResult, EOSPoint
 from ..execution.runners import CalculationRunner, SbatchRunner
-from ..io.jobs import Submission
+from ..io.jobs import Submission, resolve_job_template_path
 from ..workflows.base import WorkflowMode
 from ..workflows.elastic import ElasticMode
 from ..workflows.eos import EOSMode
+from ..workflows.param_scan import ParamScanMode
 from .factory import VaspCalculationFactory
 from .models import Calculation, PipelineConfig, PipelineInputs
 from .policies import IncarPolicy
@@ -53,8 +54,12 @@ class MechanicalPipeline:
         self.modes: dict[str, WorkflowMode] = {}
         self.eos = EOSMode(inputs=self.inputs, config=self.config, factory=self.factory)
         self.elastic = ElasticMode(inputs=self.inputs, config=self.config, factory=self.factory)
+        self.param_scan = ParamScanMode(
+            inputs=self.inputs, config=self.config, factory=self.factory
+        )
         self.register_mode("eos", self.eos)
         self.register_mode("elastic", self.elastic)
+        self.register_mode("param_scan", self.param_scan)
         if modes:
             for name, mode in modes.items():
                 self.register_mode(name, mode)
@@ -71,20 +76,20 @@ class MechanicalPipeline:
         input_poscar: str = "POSCAR",
         input_potcar: str = "POTCAR",
         input_incar: str = "INCAR",
-        input_job_template: str = "job_template.sh",
+        input_job_template: str | None = None,
         require_kspacing: bool = True,
         vasp_kbar_to_gpa: float = -0.1,
         incar_policy: IncarPolicy | None = None,
         runner: CalculationRunner | None = None,
     ) -> "MechanicalPipeline":
-        """Create a pipeline from a workdir containing POSCAR/POTCAR/INCAR/job_template.sh."""
+        """Create a pipeline from a workdir containing POSCAR/POTCAR/INCAR and a *.sh job template."""
 
         workdir = Path(workdir)
         inputs = PipelineInputs(
             poscar=workdir / input_poscar,
             potcar=workdir / input_potcar,
             incar=workdir / input_incar,
-            job_template=workdir / input_job_template,
+            job_template=resolve_job_template_path(workdir, input_job_template),
         )
         config = PipelineConfig(
             workdir=workdir,
@@ -148,10 +153,12 @@ class MechanicalPipeline:
     def prepare_eos_relaxations(
         self,
         volume_factors: Iterable[float] | None = None,
+        *,
+        combined_job: bool = True,
     ) -> list[Calculation]:
-        """Prepare EOS relaxation calculations."""
+        """Prepare EOS jobs, combined with static by default."""
 
-        return self.eos.prepare_relaxations(volume_factors)
+        return self.eos.prepare_relaxations(volume_factors, combined_job=combined_job)
 
     def prepare_relax(
         self,
@@ -159,15 +166,31 @@ class MechanicalPipeline:
         branch: str = "both",
         volume_factors: Iterable[float] | None = None,
         strain_amplitudes: Iterable[float] | None = None,
+        combined_job: bool = True,
     ) -> list[Calculation]:
-        """Prepare relaxation calculations for ``eos``, ``elastic``, or ``both``."""
+        """Prepare jobs for ``eos``, ``elastic``, or ``both``.
+
+        By default each returned job runs relaxation and static sequentially
+        under one SLURM job ID. Set ``combined_job=False`` for the legacy
+        relaxation-only preparation flow.
+        """
 
         calculations: list[Calculation] = []
         for branch_name in self._normalize_branches(branch):
             if branch_name == "eos":
-                calculations.extend(self.prepare_eos_relaxations(volume_factors))
+                calculations.extend(
+                    self.prepare_eos_relaxations(
+                        volume_factors,
+                        combined_job=combined_job,
+                    )
+                )
             elif branch_name == "elastic":
-                calculations.extend(self.prepare_elastic_relaxations(strain_amplitudes))
+                calculations.extend(
+                    self.prepare_elastic_relaxations(
+                        strain_amplitudes,
+                        combined_job=combined_job,
+                    )
+                )
         return calculations
 
     def prepare_eos_statics(self, *, allow_unrelaxed: bool = False) -> list[Calculation]:
@@ -188,10 +211,15 @@ class MechanicalPipeline:
     def prepare_elastic_relaxations(
         self,
         strain_amplitudes: Iterable[float] | None = None,
+        *,
+        combined_job: bool = True,
     ) -> list[Calculation]:
-        """Prepare elastic relaxation calculations."""
+        """Prepare elastic jobs, combined with static by default."""
 
-        return self.elastic.prepare_relaxations(strain_amplitudes)
+        return self.elastic.prepare_relaxations(
+            strain_amplitudes,
+            combined_job=combined_job,
+        )
 
     def prepare_elastic_statics(self, *, allow_unrelaxed: bool = False) -> list[Calculation]:
         """Prepare elastic static calculations."""
@@ -215,6 +243,21 @@ class MechanicalPipeline:
                     self.prepare_elastic_statics(allow_unrelaxed=allow_unrelaxed)
                 )
         return calculations
+
+    def prepare_param_scan(
+        self,
+        scan_parameters: Mapping[str, Iterable[object]],
+        *,
+        stage: str = "single_static",
+    ) -> list[Calculation]:
+        """Prepare parameter-scan calculations from the reference structure."""
+
+        return self.param_scan.prepare_calculations(scan_parameters, stage=stage)
+
+    def collect_param_scan(self) -> list[dict[str, object]]:
+        """Collect parameter-scan result rows."""
+
+        return self.param_scan.collect_results()
 
     def collect_elastic_points(self) -> list[StrainStressPoint]:
         """Collect strain/stress points."""

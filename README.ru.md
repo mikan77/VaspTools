@@ -7,9 +7,11 @@ workflow для расчета механических свойств. Осно
 кристаллы, где нужно воспроизводимо получить EOS-параметры, elastic tensor и
 производные механические характеристики.
 
-Проект специально сделан как API, а не как CLI:
+Проект сделан как API-first и дополнен легкими CLI-скриптами для типовых batch-процессов:
 
-- нет command-line клиента;
+- доступны helper-скрипты CLI:
+  - `scripts/run_param_scan.py`
+  - `scripts/run_multi_scan.py`
 - нет PyInstaller-бинарника;
 - `KPOINTS` не создается;
 - физические параметры из твоего `INCAR` не заменяются автоматически, кроме
@@ -17,7 +19,7 @@ workflow для расчета механических свойств. Осно
 
 ## Что Считает
 
-Встроены две ветки workflow.
+Встроены три ветки workflow.
 
 Ветка `eos`:
 
@@ -39,6 +41,13 @@ workflow для расчета механических свойств. Осно
   elastic anisotropy, linear compressibility и generic mechanical stability
   check.
 
+`param_scan` ветка:
+
+- создает несколько static расчетов для одной структуры;
+- переопределяет выбранные теги `INCAR` для каждой точки скана;
+- позволяет сканировать один или несколько тегов `INCAR` по сетке;
+- сохраняет все остальные параметры `INCAR` неизменными.
+
 ## Структура Репозитория
 
 ```text
@@ -53,6 +62,7 @@ VaspTools/
     base.py               # WorkflowMode extension point
     eos.py                # EOSMode
     elastic.py            # ElasticMode
+    param_scan.py         # ParamScanMode (сканирование параметров INCAR)
   analysis/
     eos.py                # Birch-Murnaghan EOS fitting
     elastic.py            # Elastic tensor fitting and mechanical properties
@@ -66,6 +76,11 @@ VaspTools/
   structures/
     poscar.py             # POSCAR/CONTCAR parser and writer
     transforms.py         # Volume scaling and strain generation
+  scripts/
+    run_param_scan.py      # CLI для скана параметров одной структуры
+    run_multi_scan.py      # CLI для пакета структур (eos/elastic)
+    _scan_utils.py         # CLI helpers
+    _scan_runtime.py       # runtime parser helpers
   tests/
     test_core.py
 ```
@@ -80,7 +95,7 @@ from VaspTools import MechanicalPipeline, PipelineConfig, PipelineInputs
 
 ```python
 from VaspTools.core import VaspCalculationFactory, IncarPolicy
-from VaspTools.workflows import WorkflowMode, EOSMode, ElasticMode
+from VaspTools.workflows import WorkflowMode, EOSMode, ElasticMode, ParamScanMode
 from VaspTools.analysis import fit_eos, fit_elastic_tensor
 from VaspTools.io import discover_calculations
 from VaspTools.execution import SbatchRunner
@@ -131,7 +146,7 @@ mechanics_run/
   POSCAR
   POTCAR
   INCAR
-  job_template.sh
+  job_template.sh   # или job.sh, или один однозначный *.sh файл
 ```
 
 Назначение файлов:
@@ -141,8 +156,17 @@ mechanics_run/
 - `POTCAR`: копируется без изменений в каждую папку расчета;
 - `INCAR`: твой шаблон с физическими параметрами: `ENCUT`, `KSPACING`, `IVDW`,
   `GGA`, `EDIFF` и т.д.;
-- `job_template.sh`: SLURM template, из которого создается `job.sh` для каждой
-  папки расчета.
+- `job_template.sh`, `job.sh` или другой `*.sh`: SLURM template, из которого
+  создается generated job script для каждой папки расчета.
+
+Правила автоопределения job template:
+
+1. Если передан `input_job_template="some_name.sh"`, используется этот файл.
+2. Иначе сначала ищется `job_template.sh`.
+3. Потом ищется `job.sh`.
+4. Потом используется единственный `*.sh` файл в `workdir`.
+5. Если найдено несколько нестандартных `*.sh`, нужно явно передать
+   `input_job_template`, чтобы API не угадывал.
 
 По умолчанию `INCAR` обязан содержать `KSPACING`. `VaspTools` никогда не
 создает и не копирует `KPOINTS`; управление k-point mesh должно идти из твоего
@@ -159,7 +183,7 @@ PREC = Accurate
 LREAL = Auto
 ```
 
-Минимальный пример `job_template.sh`:
+Минимальный пример shell job template:
 
 ```bash
 #!/bin/bash
@@ -257,15 +281,9 @@ job.sh
 vasptools_metadata.json
 ```
 
-После завершения relax jobs, когда в каждой relax-папке появился корректный
-`CONTCAR`, подготовь и отправь static calculations:
-
-```python
-static_jobs = pipe.prepare_static(branch="eos")
-pipe.submit(static_jobs)
-```
-
-Это создаст:
+Каждая relax-папка содержит driver job. Одна команда `sbatch` на каждый объем
+последовательно запускает relaxation и static в рамках одной SLURM allocation.
+Static input-папки подготавливаются сразу:
 
 ```text
 mechanics_run/eos/static/V_0p9400/
@@ -273,7 +291,11 @@ mechanics_run/eos/static/V_0p9600/
 ...
 ```
 
-После завершения static jobs, когда в каждой static-папке есть `OUTCAR` или
+Driver проверяет непустой `CONTCAR`, копирует его в static `POSCAR` и запускает
+static stage. Поэтому пример отправляет `7` jobs, и у каждой точки один SLURM
+job ID для обеих VASP-стадий.
+
+После завершения combined jobs, когда в каждой static-папке есть `OUTCAR` или
 `OSZICAR`:
 
 ```python
@@ -313,20 +335,13 @@ pipe.submit(relax_jobs)
 
 Для этого примера:
 
-- EOS relax jobs: `7`;
-- elastic relax jobs: `6 components x 2 amplitudes x 2 signs = 24`;
-- всего relax jobs при `branch="both"`: `31`.
+- EOS relax+static jobs: `7`;
+- elastic relax+static jobs: `6 components x 2 amplitudes x 2 signs = 24`;
+- всего jobs при `branch="both"`: `31`.
 
 Если нужны только 7 EOS calculations, используй `branch="eos"`.
 
-После завершения relaxation jobs:
-
-```python
-static_jobs = pipe.prepare_static(branch="both")
-pipe.submit(static_jobs)
-```
-
-После завершения static jobs:
+После завершения jobs:
 
 ```python
 results = pipe.fit(branch="both")
@@ -353,6 +368,96 @@ mechanics_run/reports/elastic_tensor.json
 mechanics_run/reports/mechanical_properties.json
 ```
 
+## CLI workflows
+
+### `run_param_scan.py` — сканирование параметров для одной структуры
+
+Скрипт для многократных запусков VASP для **одного POSCAR** с изменением тегов
+`INCAR` (например, `Zab`).
+
+Типовой кейс:
+
+- `Zab = -1` → `Zab = -1.1` → `...` → `Zab = -3` одной командой.
+
+Минимальный пример:
+
+```bash
+python scripts/run_param_scan.py \
+  --workdir /path/to/work \
+  --scan Zab=-1:-3:-0.1 \
+  --output-csv /path/to/scan_results.csv
+```
+
+Параметры:
+
+- `--workdir` — каталог с общими входными файлами (`POSCAR`, `POTCAR`, `INCAR`) и
+  шаблоном job-файла (`job_template.sh`, `job.sh` или `*.sh`).
+- `--scan` — одна или несколько спецификаций: `TAG=value` / `TAG=v1,v2,...` /
+  `TAG=start:stop:step`. Аргумент можно повторять для нескольких тегов.
+- `--stage` — `INCAR` stage (`single_static` по умолчанию).
+- `--collect-only` — собирать результаты только из уже выполненных расчетов.
+- `--dry-run` — только подготовить команды, без `sbatch`.
+- `--require-kspacing`/`--no-require-kspacing` — требование `KSPACING` в `INCAR`.
+- `--output-csv` — путь к выходному CSV.
+
+Минимальный набор полей CSV:
+
+- `structure_file`
+- `branch` (всегда `param_scan`)
+- `path`
+- `status`
+- `runtime_sec`
+- `initial_volume`
+- `final_volume`
+- `final_energy`
+- `stage`
+- `param__<TAG>` для каждого сканируемого тега
+
+### `run_multi_scan.py` — режим для нескольких структур
+
+Скрипт для директории со структурными файлами (`.vasp`, `.poscar`, `.cif`):
+создает отдельные папки запусков, запускает EOS/elastic/static пайплайны и пишет
+единый CSV.
+
+Минимальный пример:
+
+```bash
+python scripts/run_multi_scan.py \
+  --structures-dir /path/to/structures \
+  --template-dir /path/to/template \
+  --mode both \
+  --index-start 1000 \
+  --output-csv /path/to/multi_scan_results.csv
+```
+
+Параметры:
+
+- `--structures-dir` — директория со структурами.
+- `--template-dir` — директория с `POTCAR`, `INCAR`, шаблоном job.
+- `--output-root` — корневой каталог для запусков (по умолчанию
+  `<template-dir>/multi_runs`).
+- `--mode` — `eos`, `elastic` или `both`.
+- `--volume-factors` — множители `V/V0` для EOS режима.
+- `--strain-amplitudes` — амплитуды деформаций для elastic режима.
+- `--index-start` — числовой префикс для папок (`1000` по умолчанию).
+- `--collect-only` — только сбор результатов.
+- `--dry-run` — только подготовка.
+
+При `--index-start 1000` и структуре `foo` имя папки запуска будет `1000_foo`.
+
+В выходном CSV:
+
+- `structure_file`
+- `branch` (`eos` или `elastic`)
+- `path`
+- `status`
+- `runtime_sec`
+- `initial_volume`
+- `final_volume`
+- `final_energy`
+- `stage`
+- `param__volume_factor` и `param__strain` где это применимо.
+
 ## API Reference
 
 ### MechanicalPipeline.from_workdir
@@ -367,7 +472,7 @@ pipe = MechanicalPipeline.from_workdir(
     input_poscar="POSCAR",
     input_potcar="POTCAR",
     input_incar="INCAR",
-    input_job_template="job_template.sh",
+    input_job_template=None,
     require_kspacing=True,
     vasp_kbar_to_gpa=-0.1,
 )
@@ -380,8 +485,10 @@ pipe = MechanicalPipeline.from_workdir(
 - `volume_factors`: множители `V/V0` для EOS structures;
 - `strain_amplitudes`: положительные amplitudes для elastic structures;
 - `job_script_name`: имя generated script в каждой папке расчета;
-- `input_poscar`, `input_potcar`, `input_incar`, `input_job_template`: кастомные
-  имена input-файлов внутри `workdir`;
+- `input_poscar`, `input_potcar`, `input_incar`: кастомные имена input-файлов
+  внутри `workdir`;
+- `input_job_template`: явное имя shell script внутри `workdir`. Если `None`,
+  API auto-detects `job_template.sh`, `job.sh` или один однозначный `*.sh`;
 - `require_kspacing`: требовать `KSPACING` в `INCAR`;
 - `vasp_kbar_to_gpa`: перевод VASP stress из kB в GPa. По умолчанию `-0.1`,
   что переводит VASP pressure-positive convention в tensile-positive stress.
@@ -393,6 +500,7 @@ calculations = pipe.prepare_relax(
     branch="eos",              # "eos", "elastic" или "both"
     volume_factors=None,       # optional one-call EOS override
     strain_amplitudes=None,    # optional one-call elastic override
+    combined_job=True,         # один SLURM job для relaxation + static
 )
 ```
 
@@ -407,10 +515,63 @@ for calc in calculations:
     print(calc.metadata)
 ```
 
-Stages:
+Каждый возвращаемый `Calculation` представляет один combined job. Его `job.sh`
+запускает relaxation stage, затем static stage в соседней `static/` папке.
+Metadata stage для самого `Calculation` остается:
 
 - `eos_relax`
 - `elastic_relax`
+
+### prepare_param_scan
+
+```python
+scan_jobs = pipe.prepare_param_scan(
+    {"Zab": (-1.0, -1.5, -2.0)},
+    stage="single_static",
+)
+```
+
+Или сетка по нескольким тегам:
+
+```python
+scan_jobs = pipe.prepare_param_scan(
+    {"Zab": (-1.0, -1.5, -2.0), "ISMEAR": (0, -1, 1)},
+    stage="single_static",
+)
+```
+
+Директории будут выглядеть так:
+
+```text
+workdir/param_scan/scan/0001_Zab_m1p0/
+workdir/param_scan/scan/0002_Zab_m1p5/
+...
+```
+
+Метаданные каждой точки:
+
+- `scan_tokens` (словарь `TAG: value`),
+- `scan_index` (индекс точки),
+- `initial_volume`,
+- `branch = "param_scan"`,
+- `scan_<TAG>` для каждого сканируемого тега.
+
+### collect_param_scan
+
+```python
+rows = pipe.collect_param_scan()
+```
+
+Возвращает список словарей с полями:
+
+- `path`
+- `branch`
+- `status`
+- `scan_tokens`
+- `scan_index`
+- `initial_volume`
+- `final_volume` (если удалось считать)
+- `final_energy` (если удалось считать)
 
 ### prepare_static
 
@@ -421,8 +582,13 @@ static_calculations = pipe.prepare_static(
 )
 ```
 
-По умолчанию static calculations создаются из relaxation `CONTCAR`. Если
-`CONTCAR` отсутствует или пустой, API выбрасывает `FileNotFoundError`.
+`prepare_static()` сохранен как отдельный API для сценариев, где relaxation
+отправляется отдельно. Обычный путь через `prepare_relax()` уже подготавливает
+обе стадии в одном job. Если standalone static создается без `CONTCAR`, API
+выбрасывает `FileNotFoundError`.
+
+Для legacy-сценария используй `prepare_eos_relaxations(combined_job=False)` или
+`prepare_elastic_relaxations(combined_job=False)`.
 
 `allow_unrelaxed=True` стоит использовать только для debug/tests; тогда при
 отсутствии `CONTCAR` будет использован relaxation `POSCAR`.
@@ -532,7 +698,7 @@ inputs = PipelineInputs(
     poscar=Path("/path/to/POSCAR"),
     potcar=Path("/path/to/POTCAR"),
     incar=Path("/path/to/INCAR"),
-    job_template=Path("/path/to/job_template.sh"),
+    job_template=Path("/path/to/job.sh"),
 )
 
 config = PipelineConfig(
@@ -559,7 +725,17 @@ elastic_relax = pipe.elastic.prepare_relaxations()
 elastic_static = pipe.elastic.prepare_statics()
 elastic_points = pipe.elastic.collect_points()
 elastic_fit, properties = pipe.elastic.fit_from_statics()
+
+scan_jobs = pipe.param_scan.prepare_calculations(
+    {"Zab": (-1.0, -1.5, -2.0)},
+    stage="single_static",
+)
+scan_rows = pipe.param_scan.collect_results()
 ```
+
+`prepare_relaxations()` для EOS и elastic подготавливает один combined
+relax+static job на каждую точку. `prepare_statics()` остается доступным, если
+две стадии нужно подготовить отдельно.
 
 Это удобно, если нужен прямой контроль над одной веткой.
 

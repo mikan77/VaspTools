@@ -20,8 +20,10 @@ class EOSMode(WorkflowMode):
     def prepare_relaxations(
         self,
         volume_factors: Iterable[float] | None = None,
+        *,
+        combined_job: bool = True,
     ) -> list[Calculation]:
-        """Prepare fixed-shape, fixed-volume EOS relaxation calculations."""
+        """Prepare EOS jobs, optionally combining relaxation and static stages."""
 
         structure = load_poscar(self.inputs.poscar)
         factors = tuple(self.config.volume_factors if volume_factors is None else volume_factors)
@@ -29,19 +31,33 @@ class EOSMode(WorkflowMode):
         for factor in factors:
             scaled = scale_structure_to_volume(structure, volume_factor=float(factor))
             label = f"V_{factor:.4f}".replace(".", "p")
-            calculations.append(
-                self.factory.prepare(
-                    directory=self.root / "relax" / label,
+            relax_directory = self.root / "relax" / label
+            static_directory = self.root / "static" / label
+            metadata = {
+                "branch": self.branch,
+                "volume_factor": float(factor),
+                "target_volume": float(scaled.volume),
+            }
+            if combined_job:
+                calculation = self.factory.prepare_relax_static(
+                    relax_directory=relax_directory,
+                    static_directory=static_directory,
+                    structure=scaled,
+                    relax_stage="eos_relax",
+                    static_stage="eos_static",
+                    name=f"eos_relax_{label}",
+                    metadata=metadata,
+                    static_metadata=metadata,
+                )
+            else:
+                calculation = self.factory.prepare(
+                    directory=relax_directory,
                     structure=scaled,
                     stage="eos_relax",
                     name=f"eos_relax_{label}",
-                    metadata={
-                        "branch": self.branch,
-                        "volume_factor": float(factor),
-                        "target_volume": float(scaled.volume),
-                    },
+                    metadata=metadata,
                 )
-            )
+            calculations.append(calculation)
         return calculations
 
     def prepare_statics(self, *, allow_unrelaxed: bool = False) -> list[Calculation]:

@@ -21,8 +21,10 @@ class ElasticMode(WorkflowMode):
     def prepare_relaxations(
         self,
         strain_amplitudes: Iterable[float] | None = None,
+        *,
+        combined_job: bool = True,
     ) -> list[Calculation]:
-        """Prepare strained-cell relaxation calculations for elastic fitting."""
+        """Prepare elastic jobs, optionally combining both stages."""
 
         structure = load_poscar(self.inputs.poscar)
         amplitudes = tuple(
@@ -31,18 +33,33 @@ class ElasticMode(WorkflowMode):
         calculations = []
         for label, strain in generate_strain_vectors(amplitudes):
             strained = apply_strain(structure, strain)
-            calculations.append(
-                self.factory.prepare(
-                    directory=self.root / "relax" / label,
+            relax_directory = self.root / "relax" / label
+            static_directory = self.root / "static" / label
+            strain_metadata = [float(value) for value in strain]
+            metadata = {
+                "branch": self.branch,
+                "strain": strain_metadata,
+            }
+            if combined_job:
+                calculation = self.factory.prepare_relax_static(
+                    relax_directory=relax_directory,
+                    static_directory=static_directory,
+                    structure=strained,
+                    relax_stage="elastic_relax",
+                    static_stage="elastic_static",
+                    name=f"elastic_relax_{label}",
+                    metadata=metadata,
+                    static_metadata=metadata,
+                )
+            else:
+                calculation = self.factory.prepare(
+                    directory=relax_directory,
                     structure=strained,
                     stage="elastic_relax",
                     name=f"elastic_relax_{label}",
-                    metadata={
-                        "branch": self.branch,
-                        "strain": [float(value) for value in strain],
-                    },
+                    metadata=metadata,
                 )
-            )
+            calculations.append(calculation)
         return calculations
 
     def prepare_statics(self, *, allow_unrelaxed: bool = False) -> list[Calculation]:

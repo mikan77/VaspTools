@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["ElasticMode", "EOSMode", "WorkflowMode"]
+__all__ = ["ElasticMode", "EOSMode", "ParamScanMode", "WorkflowMode"]
 
 
 def __getattr__(name: str) -> Any:
@@ -20,6 +20,10 @@ def __getattr__(name: str) -> Any:
         from .elastic import ElasticMode
 
         exports = {"ElasticMode": ElasticMode}
+    elif name == "ParamScanMode":
+        from .param_scan import ParamScanMode
+
+        exports = {"ParamScanMode": ParamScanMode}
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

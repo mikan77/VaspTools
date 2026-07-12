@@ -17,6 +17,7 @@ __all__ = [
     "MechanicalPipeline",
     "PipelineConfig",
     "PipelineInputs",
+    "ParamScanMode",
     "SbatchRunner",
     "StrainStressPoint",
     "Submission",
@@ -33,6 +34,8 @@ __all__ = [
     "mechanical_properties",
     "parse_sbatch_job_id",
     "render_job_script",
+    "render_two_stage_job_script",
+    "resolve_job_template_path",
     "scale_structure_to_volume",
     "strain_matrix_from_voigt",
     "submit_sbatch",
@@ -63,6 +66,10 @@ def __getattr__(name: str) -> Any:
             "EOSMode": EOSMode,
             "WorkflowMode": WorkflowMode,
         }
+    elif name == "ParamScanMode":
+        from .workflows import ParamScanMode
+
+        exports = {"ParamScanMode": ParamScanMode}
     elif name == "VaspCalculationFactory":
         from .core.factory import VaspCalculationFactory
 
@@ -75,13 +82,29 @@ def __getattr__(name: str) -> Any:
         from .execution.runners import CalculationRunner, SbatchRunner
 
         exports = {"CalculationRunner": CalculationRunner, "SbatchRunner": SbatchRunner}
-    elif name in {"Submission", "parse_sbatch_job_id", "render_job_script", "submit_sbatch"}:
-        from .io.jobs import Submission, parse_sbatch_job_id, render_job_script, submit_sbatch
+    elif name in {
+        "Submission",
+        "parse_sbatch_job_id",
+        "render_job_script",
+        "render_two_stage_job_script",
+        "resolve_job_template_path",
+        "submit_sbatch",
+    }:
+        from .io.jobs import (
+            Submission,
+            parse_sbatch_job_id,
+            render_job_script,
+            render_two_stage_job_script,
+            resolve_job_template_path,
+            submit_sbatch,
+        )
 
         exports = {
             "Submission": Submission,
             "parse_sbatch_job_id": parse_sbatch_job_id,
             "render_job_script": render_job_script,
+            "render_two_stage_job_script": render_two_stage_job_script,
+            "resolve_job_template_path": resolve_job_template_path,
             "submit_sbatch": submit_sbatch,
         }
     elif name in {"make_stage_incar", "validate_kspacing_incar"}:

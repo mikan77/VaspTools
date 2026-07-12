@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import shlex
 import subprocess
 
 
@@ -13,6 +14,11 @@ JOB_NAME_PLACEHOLDERS = (
     "{JOB_NAME}",
     "{{JOB_NAME}}",
     "__JOB_NAME__",
+)
+
+DEFAULT_JOB_TEMPLATE_NAMES = (
+    "job_template.sh",
+    "job.sh",
 )
 
 
@@ -83,6 +89,85 @@ def write_job_script(
     template = Path(template_path).read_text(encoding="utf-8")
     rendered = render_job_script(template, job_name)
     Path(output_path).write_text(rendered, encoding="utf-8")
+
+
+def render_two_stage_job_script(
+    template: str,
+    job_name: str,
+    *,
+    static_directory: str,
+    relax_stage_script: str = ".vasptools_relax_stage.sh",
+    static_stage_script: str = "job.sh",
+) -> str:
+    """Render one SLURM driver that runs relaxation and static stages.
+
+    The original template is executed as a regular shell script for each
+    stage. Only its shebang and ``#SBATCH`` directives are copied to the
+    driver, so the allocation is requested once and the VASP command runs
+    twice inside that same allocation.
+    """
+
+    rendered = render_job_script(template, job_name)
+    lines = rendered.splitlines()
+    directives = [line for line in lines if line.lstrip().startswith("#SBATCH")]
+
+    static_token = shlex.quote(static_directory)
+    relax_script_token = shlex.quote(relax_stage_script)
+    static_script_token = shlex.quote(static_stage_script)
+    driver = [
+        "#!/bin/bash",
+        *directives,
+        "",
+        "set -euo pipefail",
+        'SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+        f'STATIC_DIR="$SCRIPT_DIR"/{static_token}',
+        f'RELAX_STAGE="$SCRIPT_DIR"/{relax_script_token}',
+        f'STATIC_STAGE="$STATIC_DIR"/{static_script_token}',
+        "",
+        '(cd "$SCRIPT_DIR" && bash -e "$RELAX_STAGE")',
+        'test -s "$SCRIPT_DIR/CONTCAR"',
+        'test -d "$STATIC_DIR"',
+        'cp "$SCRIPT_DIR/CONTCAR" "$STATIC_DIR/POSCAR"',
+        '(cd "$STATIC_DIR" && bash -e "$STATIC_STAGE")',
+        "",
+    ]
+    return "\n".join(driver)
+
+
+def resolve_job_template_path(
+    workdir: str | Path,
+    requested_name: str | None = None,
+) -> Path:
+    """Resolve the shared shell script used as a job template.
+
+    If requested_name is provided, that exact file is used. Otherwise the
+    resolver prefers job_template.sh, then job.sh, then a single unambiguous
+    *.sh file in the workdir.
+    """
+
+    workdir_path = Path(workdir)
+    if requested_name:
+        return workdir_path / requested_name
+
+    for filename in DEFAULT_JOB_TEMPLATE_NAMES:
+        candidate = workdir_path / filename
+        if candidate.is_file():
+            return candidate
+
+    shell_scripts = sorted(path for path in workdir_path.glob("*.sh") if path.is_file())
+    if len(shell_scripts) == 1:
+        return shell_scripts[0]
+    if not shell_scripts:
+        raise FileNotFoundError(
+            f"No shell job template found in {workdir_path}. Expected job_template.sh, "
+            "job.sh, or one *.sh file."
+        )
+
+    choices = ", ".join(path.name for path in shell_scripts)
+    raise ValueError(
+        "Multiple *.sh job templates found in "
+        f"{workdir_path}: {choices}. Pass input_job_template explicitly."
+    )
 
 
 def parse_sbatch_job_id(output: str) -> str | None:

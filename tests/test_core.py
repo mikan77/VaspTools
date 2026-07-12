@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +21,12 @@ from VaspTools.analysis.eos import EOSPoint, birch_murnaghan_energy, fit_eos
 from VaspTools.core import MechanicalPipeline, PipelineConfig, PipelineInputs
 from VaspTools.io.discovery import discover_calculations
 from VaspTools.io.incar import Incar, make_stage_incar, validate_kspacing_incar
-from VaspTools.io.jobs import parse_sbatch_job_id, render_job_script
+from VaspTools.io.jobs import (
+    parse_sbatch_job_id,
+    render_job_script,
+    render_two_stage_job_script,
+    resolve_job_template_path,
+)
 from VaspTools.io.results import (
     parse_energy_from_oszicar,
     parse_energy_from_outcar,
@@ -46,11 +52,11 @@ def simple_structure() -> Structure:
     return Structure(Lattice.cubic(5.0), ["Si"], [[0, 0, 0]])
 
 
-def write_basic_inputs(folder: Path) -> PipelineInputs:
+def write_basic_inputs(folder: Path, *, job_filename: str = "job_template.sh") -> PipelineInputs:
     poscar = folder / "POSCAR"
     potcar = folder / "POTCAR"
     incar = folder / "INCAR"
-    job = folder / "job_template.sh"
+    job = folder / job_filename
 
     write_poscar(simple_structure(), poscar)
     potcar.write_text("POTCAR placeholder\n", encoding="utf-8")
@@ -113,6 +119,50 @@ class JobTests(unittest.TestCase):
     def test_parse_sbatch_job_id(self):
         self.assertEqual(parse_sbatch_job_id("Submitted batch job 12345\n"), "12345")
         self.assertIsNone(parse_sbatch_job_id("no job id"))
+
+    def test_render_two_stage_job_script_runs_both_stages_in_one_allocation(self):
+        template = """#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --time=10:00:00
+module load vasp
+srun vasp_std
+"""
+
+        driver = render_two_stage_job_script(
+            template,
+            "combined test",
+            static_directory="../../static/V_1p0000",
+        )
+
+        self.assertIn("#SBATCH --job-name=combined_test", driver)
+        self.assertIn("#SBATCH --time=10:00:00", driver)
+        self.assertIn("bash -e", driver)
+        self.assertIn("CONTCAR", driver)
+        self.assertNotIn("srun vasp_std", driver)
+
+    def test_resolve_job_template_accepts_job_sh_and_any_single_shell_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job = root / "job.sh"
+            job.write_text("#!/bin/sh\n#SBATCH --job-name={job_name}\n", encoding="utf-8")
+            self.assertEqual(resolve_job_template_path(root), job)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            custom = root / "vasp_submit.sh"
+            custom.write_text("#!/bin/sh\n#SBATCH --job-name={job_name}\n", encoding="utf-8")
+            self.assertEqual(resolve_job_template_path(root), custom)
+
+    def test_resolve_job_template_requires_explicit_name_when_multiple_shell_scripts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "first.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (root / "second.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "Multiple"):
+                resolve_job_template_path(root)
+
+            self.assertEqual(resolve_job_template_path(root, "second.sh"), root / "second.sh")
 
 
 class StructureTests(unittest.TestCase):
@@ -229,9 +279,19 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(relax_calcs), 2)
             for calc in relax_calcs:
                 self.assertFalse((calc.directory / "KPOINTS").exists())
+                self.assertTrue((calc.directory / ".vasptools_relax_stage.sh").exists())
+                self.assertIn("bash -e", (calc.directory / "job.sh").read_text())
                 incar = Incar.from_file(calc.directory / "INCAR")
                 self.assertEqual(incar["ISIF"], 2)
                 self.assertIn("KSPACING", incar)
+
+                static_directory = calc.directory.parent.parent / "static" / calc.directory.name
+                static_incar = Incar.from_file(static_directory / "INCAR")
+                self.assertEqual(static_incar["ISIF"], 2)
+                self.assertEqual(static_incar["ALGO"], "All")
+                self.assertEqual(static_incar["ISEARCH"], 1)
+                self.assertEqual(static_incar["IBRION"], -1)
+                self.assertEqual(static_incar["NSW"], 0)
 
             static_calcs = pipe.prepare_eos_statics(allow_unrelaxed=True)
             self.assertEqual(len(static_calcs), 2)
@@ -259,6 +319,55 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(calcs), 12)
             self.assertEqual(len(submissions), 2)
             self.assertTrue(all(submission.dry_run for submission in submissions))
+
+    def test_combined_driver_runs_relax_then_static_in_one_shell_job(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inputs = write_basic_inputs(root)
+            inputs.job_template.write_text(
+                """#!/bin/bash
+#SBATCH --job-name={job_name}
+if grep -q 'IBRION = -1' INCAR; then
+    printf 'static output\\n' > OUTCAR
+else
+    cp POSCAR CONTCAR
+fi
+""",
+                encoding="utf-8",
+            )
+            pipe = MechanicalPipeline(
+                inputs,
+                PipelineConfig(workdir=root / "run", name="test", volume_factors=(1.0,)),
+            )
+
+            calculation = pipe.prepare_eos_relaxations()[0]
+            completed = subprocess.run(
+                ["bash", str(calculation.directory / "job.sh")],
+                cwd=calculation.directory,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            static_directory = calculation.directory.parent.parent / "static" / calculation.directory.name
+            self.assertEqual(
+                (calculation.directory / "CONTCAR").read_text(encoding="utf-8"),
+                (static_directory / "POSCAR").read_text(encoding="utf-8"),
+            )
+            self.assertTrue((static_directory / "OUTCAR").exists())
+
+    def test_relaxation_only_mode_keeps_legacy_two_step_flow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inputs = write_basic_inputs(root)
+            pipe = MechanicalPipeline(
+                inputs,
+                PipelineConfig(workdir=root / "run", name="test", volume_factors=(1.0,)),
+            )
+
+            calculations = pipe.prepare_eos_relaxations(combined_job=False)
+            self.assertFalse((calculations[0].directory.parent.parent / "static").exists())
 
     def test_pipeline_collects_eos_and_writes_fit_report(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -386,11 +495,38 @@ class PipelineTests(unittest.TestCase):
             relax_calcs = pipe.prepare_relax(branch="eos")
             submissions = pipe.submit(relax_calcs, dry_run=True)
 
-            calculations = discover_calculations(root, branch="eos")
+            relax_discovered = discover_calculations(root, branch="eos", stage="eos_relax")
+            static_discovered = discover_calculations(root, branch="eos", stage="eos_static")
             self.assertEqual(len(relax_calcs), 2)
             self.assertEqual(len(submissions), 2)
-            self.assertEqual(len(calculations), 2)
+            self.assertEqual(len(relax_discovered), 2)
+            self.assertEqual(len(static_discovered), 2)
             self.assertTrue(all(submission.dry_run for submission in submissions))
+
+    def test_pipeline_from_workdir_accepts_job_sh_and_custom_shell_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_basic_inputs(root, job_filename="job.sh")
+            pipe = MechanicalPipeline.from_workdir(root, name="job_sh_test", volume_factors=(1.0,))
+
+            relax_calcs = pipe.prepare_relax(branch="eos")
+
+            self.assertEqual(pipe.inputs.job_template, root / "job.sh")
+            self.assertTrue((relax_calcs[0].directory / "job.sh").exists())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_basic_inputs(root, job_filename="submit_vasp.sh")
+            pipe = MechanicalPipeline.from_workdir(
+                root,
+                name="custom_script_test",
+                volume_factors=(1.0,),
+            )
+
+            relax_calcs = pipe.prepare_relax(branch="eos")
+
+            self.assertEqual(pipe.inputs.job_template, root / "submit_vasp.sh")
+            self.assertTrue((relax_calcs[0].directory / "job.sh").exists())
 
 
 if __name__ == "__main__":
