@@ -55,8 +55,8 @@ class MolecularStructureExtractor:
     """Extract molecular geometries and symmetry-unique molecules.
 
     Molecule detection uses a periodic covalent-radius graph. Geometry
-    equivalence is decided by fingerprint prefilter plus Kabsch RMSD. Symmetry
-    equivalence is decided by applying actual space-group operations to all
+    equivalence is decided by species/formula plus Kabsch RMSD; fingerprints
+    are retained as stable report metadata. Symmetry equivalence is decided by applying actual space-group operations to all
     atoms, including the periodic translation needed to compare molecules that
     cross a cell boundary.
     """
@@ -268,7 +268,7 @@ class MolecularStructureExtractor:
         for molecule in self._molecules:
             geometry_id = ""
             for geometry in geometries:
-                if geometry.fingerprint != molecule.fingerprint:
+                if geometry.formula != molecule.formula:
                     continue
                 representative = representatives[geometry.geometry_id]
                 if self._molecules_match(representative.molecule, molecule.molecule):

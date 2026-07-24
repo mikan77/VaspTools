@@ -50,7 +50,8 @@ reports/
 eos/
 elastic/
 static_only/
-
+test/ 
+test_camp/
 # Logs and temporary files
 *.log
 *.tmp
