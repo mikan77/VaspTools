@@ -417,7 +417,7 @@ vasptools relax init          # создаст шаблоны vasptools.yaml + r
 # структуры -> structs/, POTCAR + INCAR + job_template.sh -> tmpl/
 vasptools relax submit --dry-run   # только подготовить, посмотреть tmpl/relax_runs/
 vasptools relax submit             # один sbatch на структуру
-vasptools relax collect            # после расчетов: summary.csv + relaxed/
+vasptools relax collect            # после расчетов: summary.xlsx + relaxed/
 ```
 
 `vasptools.yaml` (пути относительно файла; любой флаг `run_relax_batch.py`
@@ -426,7 +426,7 @@ vasptools relax collect            # после расчетов: summary.csv + 
 ```yaml
 structures_dir: structs
 template_dir: tmpl
-output_csv: summary.csv
+output: summary.xlsx        # .xlsx = Excel, .csv = CSV
 protocol: relax.yaml        # или relax_steps: 2, или ничего — один шаг
 # output_root, relaxed_dir, relaxed_format, index_start, potcar_mode,
 # symprec, bond_tolerance, job_script_name, require_kspacing
@@ -551,7 +551,7 @@ python scripts/run_relax_batch.py \
   --structures-dir /path/to/structures \
   --template-dir /path/to/template \
   --relax-steps 2 \
-  --output-csv /path/to/relax_summary.csv
+  --output /path/to/relax_summary.xlsx
 ```
 
 Сбор после завершения задач:
@@ -561,7 +561,7 @@ python scripts/run_relax_batch.py \
   --structures-dir /path/to/structures \
   --template-dir /path/to/template \
   --collect-only \
-  --output-csv /path/to/relax_summary.csv
+  --output /path/to/relax_summary.xlsx
 ```
 
 Параметры:
@@ -581,6 +581,8 @@ python scripts/run_relax_batch.py \
   подсчета молекул;
 - `--potcar-mode` — `hardlink` (по умолчанию: общий `POTCAR` не занимает
   места), `copy` или `symlink`;
+- `--output` — сводная таблица; `.xlsx` пишет Excel (нужен `openpyxl`),
+  любое другое расширение — CSV (`--output-csv` оставлен как синоним);
 - `--collect-only` — только сбор существующих запусков;
 - `--dry-run` — только подготовка, без `sbatch`.
 
@@ -616,7 +618,7 @@ input-файлов и выходов VASP. Ставь `LWAVE = .FALSE.` и `LCHA
 большого пакета. Общий `POTCAR` заменяй через `mv`, а не правкой на месте:
 hard links делят содержимое файла.
 
-Колонки CSV:
+Колонки таблицы (xlsx или csv):
 
 - `structure_file`, `run_dir`, `job_id`, `status`, `converged`,
   `steps_completed`, `step_names`;
@@ -691,7 +693,7 @@ python scripts/run_relax_batch.py \
   --structures-dir /path/to/structures \
   --template-dir /path/to/template \
   --protocol /path/to/template/relax.yaml \
-  --output-csv /path/to/relax_summary.csv
+  --output /path/to/relax_summary.xlsx
 ```
 
 Из Python:
@@ -720,8 +722,8 @@ python scripts/collect_legacy_relax.py \
   --relaxed-dir /path/to/run2_relaxed        # по умолчанию <runs-dir>_relaxed
 ```
 
-- `run2_summary.xlsx` (лист `relaxations` + лист `steps`, плюс та же
-  таблица в `.csv`): `idx`, `status`, `converged`, `steps_finished`,
+- `run2_summary.xlsx` (лист `relaxations` + лист `steps`; для CSV укажи
+  `--output имя.csv`): `idx`, `status`, `converged`, `steps_finished`,
   `energy_initial_eV` (первый `TOTEN` шага 1), `energy_final_eV` (последний
   `TOTEN` последнего завершенного шага), `energy_stepN_eV` по шагам,
   `energy_final_per_molecule_eV`, `n_molecules_*`, `space_group_*`,
@@ -733,7 +735,7 @@ python scripts/collect_legacy_relax.py \
 Рабочая папка, где `OUTCAR` без финального блока timing, считается
 незавершенным дополнительным шагом (`status = running_or_killed`); энергии
 тогда берутся из последнего заархивированного `step_N_final`. Для XLSX нужен
-`openpyxl` (`pip install "VaspTools[xlsx]"`); без него пишется только CSV.
+`openpyxl` (`pip install "VaspTools[xlsx]"`).
 
 ## API Reference
 

@@ -15,7 +15,7 @@ Expected layout (one folder per structure, produced by the old job.py driver)::
 
 For every calc_* folder the script finds the last finished step, reads energies
 (initial = first TOTEN of step 1, final = last TOTEN of the last step), counts
-molecules, volume, density and space group before/after, writes one XLSX (+ CSV)
+molecules, volume, density and space group before/after, writes one XLSX (or CSV)
 and copies the last CONTCAR to <relaxed-dir>/<idx>_POSCAR.
 
 Example:
@@ -26,7 +26,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import csv
 import re
 import shutil
 import sys
@@ -45,6 +44,7 @@ from VaspTools.io.results import (
     read_initial_energy,
 )
 from VaspTools.io.runtime import read_runtime_seconds
+from VaspTools.io.tables import write_table
 from VaspTools.scripts._scan_utils import describe_structure, load_structure
 
 
@@ -85,8 +85,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runs-dir", required=True, help="Directory with calc_XXXXX folders (e.g. run2).")
     parser.add_argument(
         "--xlsx",
+        "--output",
+        dest="output",
         default=None,
-        help="Output XLSX path; a CSV with the same stem is written too (default: <runs-dir>_summary.xlsx).",
+        help="Summary table path (default: <runs-dir>_summary.xlsx); a .csv suffix writes CSV instead.",
     )
     parser.add_argument(
         "--relaxed-dir",
@@ -266,7 +268,7 @@ def export_contcar(row: dict[str, object], relaxed_dir: Path, *, include_unfinis
     row["relaxed_path"] = str(target)
 
 
-def write_outputs(rows: list[dict[str, object]], steps: dict[str, dict[int, float | None]], xlsx: Path) -> None:
+def write_outputs(rows: list[dict[str, object]], steps: dict[str, dict[int, float | None]], output: Path) -> None:
     max_step = max([n for per_run in steps.values() for n in per_run] + [0])
     step_columns = [f"energy_step{n}_eV" for n in range(1, max_step + 1)]
     columns = list(BASE_COLUMNS[:9]) + step_columns + list(BASE_COLUMNS[9:])
@@ -274,48 +276,14 @@ def write_outputs(rows: list[dict[str, object]], steps: dict[str, dict[int, floa
         for n in range(1, max_step + 1):
             row[f"energy_step{n}_eV"] = steps.get(str(row["idx"]), {}).get(n)
 
-    xlsx.parent.mkdir(parents=True, exist_ok=True)
-    csv_path = xlsx.with_suffix(".csv")
-    with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: ("" if row.get(key) is None else row.get(key)) for key in columns})
-
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font
-        from openpyxl.utils import get_column_letter
-    except ImportError:
-        print(f"openpyxl is not installed; wrote CSV only: {csv_path}", file=sys.stderr)
-        return
-
-    book = Workbook()
-    sheet = book.active
-    sheet.title = "relaxations"
-    sheet.append(columns)
-    for cell in sheet[1]:
-        cell.font = Font(bold=True)
-    for row in rows:
-        sheet.append([row.get(key) for key in columns])
-    sheet.freeze_panes = "B2"
-    sheet.auto_filter.ref = sheet.dimensions
-    for index, key in enumerate(columns, start=1):
-        width = max(len(key), *(len(str(row.get(key, ""))) for row in rows)) if rows else len(key)
-        sheet.column_dimensions[get_column_letter(index)].width = min(max(10, width + 2), 60)
-        if key.startswith(("energy", "delta", "volume", "density", "runtime")):
-            for cell in sheet.iter_cols(min_col=index, max_col=index, min_row=2):
-                for item in cell:
-                    item.number_format = "0.000000" if key.startswith(("energy", "delta_energy")) else "0.000"
-
-    steps_sheet = book.create_sheet("steps")
-    steps_sheet.append(["idx", "step", "energy_eV"])
-    for cell in steps_sheet[1]:
-        cell.font = Font(bold=True)
-    for idx, per_run in steps.items():
-        for n, energy in sorted(per_run.items()):
-            steps_sheet.append([idx, n, energy])
-    book.save(xlsx)
+    step_rows = [[idx, n, energy] for idx, per_run in steps.items() for n, energy in sorted(per_run.items())]
+    write_table(
+        rows,
+        columns,
+        output,
+        sheet="relaxations",
+        extra_sheets={"steps": (["idx", "step", "energy_eV"], step_rows)},
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -323,7 +291,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     runs_dir = Path(args.runs_dir).resolve()
     if not runs_dir.is_dir():
         raise SystemExit(f"Not a directory: {runs_dir}")
-    xlsx = Path(args.xlsx).resolve() if args.xlsx else runs_dir.parent / f"{runs_dir.name}_summary.xlsx"
+    output = Path(args.output).resolve() if args.output else runs_dir.parent / f"{runs_dir.name}_summary.xlsx"
     relaxed_dir = (
         Path(args.relaxed_dir).resolve() if args.relaxed_dir else runs_dir.parent / f"{runs_dir.name}_relaxed"
     )
@@ -346,11 +314,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     for row in rows:
         row.pop("_contcar", None)
-    write_outputs(rows, steps, xlsx)
+    write_outputs(rows, steps, output)
 
     completed = sum(1 for row in rows if row["status"] == "completed")
     exported = sum(1 for row in rows if row.get("relaxed_path"))
-    print(f"\n{len(rows)} runs ({completed} completed); table: {xlsx} (+ .csv)")
+    print(f"\n{len(rows)} runs ({completed} completed); table: {output}")
     print(f"{exported} CONTCAR(s) copied to {relaxed_dir} as <idx>_POSCAR")
 
 

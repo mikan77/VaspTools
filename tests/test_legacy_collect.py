@@ -53,21 +53,27 @@ class LegacyCollectTests(unittest.TestCase):
             make_legacy_run(run2, "00046", finished_steps=3, running_tail=False)
             make_legacy_run(run2, "00665", finished_steps=2, running_tail=True)
             xlsx = root / "summary.xlsx"
+            csv_path = root / "summary.csv"
 
             subprocess.run(
                 [sys.executable, str(SCRIPT), "--runs-dir", str(run2), "--xlsx", str(xlsx)],
                 check=True,
                 capture_output=True,
             )
+            subprocess.run(
+                [sys.executable, str(SCRIPT), "--runs-dir", str(run2), "--output", str(csv_path)],
+                check=True,
+                capture_output=True,
+            )
 
-            with xlsx.with_suffix(".csv").open(newline="", encoding="utf-8") as handle:
+            with csv_path.open(newline="", encoding="utf-8") as handle:
                 rows = {row["idx"]: row for row in csv.DictReader(handle)}
             done = rows["00046"]
             self.assertEqual(done["status"], "completed")
             self.assertEqual(done["steps_finished"], "3")
-            self.assertEqual(done["energy_initial_eV"], "-11.0")
-            self.assertEqual(done["energy_final_eV"], "-13.5")
-            self.assertEqual(done["energy_step2_eV"], "-12.5")
+            self.assertEqual(float(done["energy_initial_eV"]), -11.0)
+            self.assertEqual(float(done["energy_final_eV"]), -13.5)
+            self.assertEqual(float(done["energy_step2_eV"]), -12.5)
             self.assertEqual(done["n_molecules_initial"], "2")
             self.assertEqual(done["n_molecules_final"], "2")
             self.assertAlmostEqual(float(done["delta_volume_percent"]), -30.0, places=6)
@@ -76,7 +82,7 @@ class LegacyCollectTests(unittest.TestCase):
 
             tail = rows["00665"]
             self.assertEqual(tail["status"], "running_or_killed")
-            self.assertEqual(tail["energy_final_eV"], "-12.5")  # from step_2_final, not the running dir
+            self.assertEqual(float(tail["energy_final_eV"]), -12.5)  # from step_2_final, not the running dir
             self.assertEqual(tail["relaxed_path"], "")
 
             relaxed = root / "run2_relaxed"
@@ -86,13 +92,18 @@ class LegacyCollectTests(unittest.TestCase):
                 (run2 / "calc_00046" / "calc_00046" / "step_3_final" / "CONTCAR").read_bytes(),
             )
 
-            try:
-                import openpyxl
-            except ImportError:
-                return
+            import openpyxl
+
             book = openpyxl.load_workbook(xlsx)
             self.assertEqual(book.sheetnames, ["relaxations", "steps"])
-            self.assertEqual(book["relaxations"].max_row, 3)
+            sheet = book["relaxations"]
+            self.assertEqual(sheet.max_row, 3)
+            header = [cell.value for cell in sheet[1]]
+            first = dict(zip(header, [cell.value for cell in sheet[2]]))
+            self.assertEqual(first["idx"], "00046")
+            self.assertEqual(first["energy_final_eV"], -13.5)
+            self.assertEqual(sheet["G2"].number_format, "0.000000")
+            self.assertEqual(book["steps"].max_row, 6)  # 3 + 2 steps
 
     def test_include_unfinished_exports_running_contcar(self):
         with tempfile.TemporaryDirectory() as tmp:

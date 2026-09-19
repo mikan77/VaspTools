@@ -414,7 +414,7 @@ vasptools relax init          # writes vasptools.yaml + relax.yaml templates
 # put structures into structs/, POTCAR + INCAR + job_template.sh into tmpl/
 vasptools relax submit --dry-run   # prepare only, inspect tmpl/relax_runs/
 vasptools relax submit             # one sbatch per structure
-vasptools relax collect            # after the jobs: summary.csv + relaxed/
+vasptools relax collect            # after the jobs: summary.xlsx + relaxed/
 ```
 
 `vasptools.yaml` (paths are relative to the file; any `run_relax_batch.py`
@@ -423,7 +423,7 @@ flag given on the command line overrides it):
 ```yaml
 structures_dir: structs
 template_dir: tmpl
-output_csv: summary.csv
+output: summary.xlsx        # .xlsx = Excel, .csv = CSV
 protocol: relax.yaml        # or relax_steps: 2, or nothing for one step
 # output_root, relaxed_dir, relaxed_format, index_start, potcar_mode,
 # symprec, bond_tolerance, job_script_name, require_kspacing
@@ -548,7 +548,7 @@ python scripts/run_relax_batch.py \
   --structures-dir /path/to/structures \
   --template-dir /path/to/template \
   --relax-steps 2 \
-  --output-csv /path/to/relax_summary.csv
+  --output /path/to/relax_summary.xlsx
 ```
 
 Collect after the jobs finished:
@@ -558,7 +558,7 @@ python scripts/run_relax_batch.py \
   --structures-dir /path/to/structures \
   --template-dir /path/to/template \
   --collect-only \
-  --output-csv /path/to/relax_summary.csv
+  --output /path/to/relax_summary.xlsx
 ```
 
 Parameters:
@@ -578,6 +578,8 @@ Parameters:
   molecule counting;
 - `--potcar-mode` — `hardlink` (default: shared `POTCAR` takes no extra space),
   `copy`, or `symlink`;
+- `--output` — summary table; `.xlsx` writes Excel (needs `openpyxl`), any
+  other suffix writes CSV (`--output-csv` is kept as an alias);
 - `--collect-only` — collect existing runs only;
 - `--dry-run` — prepare only, no `sbatch`.
 
@@ -613,7 +615,7 @@ VASP outputs. Put `LWAVE = .FALSE.` and `LCHARG = .FALSE.` in the template
 large batch. Replace the shared `POTCAR` with `mv`, not by editing in place,
 because hard links share the file content.
 
-Output CSV columns:
+Summary table columns (xlsx or csv):
 
 - `structure_file`, `run_dir`, `job_id`, `status`, `converged`,
   `steps_completed`, `step_names`;
@@ -687,7 +689,7 @@ python scripts/run_relax_batch.py \
   --structures-dir /path/to/structures \
   --template-dir /path/to/template \
   --protocol /path/to/template/relax.yaml \
-  --output-csv /path/to/relax_summary.csv
+  --output /path/to/relax_summary.xlsx
 ```
 
 From Python:
@@ -716,8 +718,8 @@ python scripts/collect_legacy_relax.py \
   --relaxed-dir /path/to/run2_relaxed        # default: <runs-dir>_relaxed
 ```
 
-- `run2_summary.xlsx` (sheet `relaxations` + sheet `steps`, and the same
-  table as `.csv`): `idx`, `status`, `converged`, `steps_finished`,
+- `run2_summary.xlsx` (sheet `relaxations` + sheet `steps`; pass
+  `--output name.csv` for CSV instead): `idx`, `status`, `converged`, `steps_finished`,
   `energy_initial_eV` (first `TOTEN` of step 1), `energy_final_eV` (last
   `TOTEN` of the last finished step), `energy_stepN_eV` per step,
   `energy_final_per_molecule_eV`, `n_molecules_*`, `space_group_*`,
@@ -729,7 +731,7 @@ python scripts/collect_legacy_relax.py \
 A working directory whose `OUTCAR` lacks the final timing block is treated as
 an unfinished extra step (`status = running_or_killed`); energies then come
 from the last archived `step_N_final`. XLSX output needs `openpyxl`
-(`pip install "VaspTools[xlsx]"`); without it only the CSV is written.
+(`pip install "VaspTools[xlsx]"`).
 
 ## API Reference
 

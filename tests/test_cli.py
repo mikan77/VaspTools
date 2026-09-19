@@ -52,18 +52,23 @@ class CliTests(unittest.TestCase):
             self.assertEqual(submit.returncode, 0, submit.stderr)
             self.assertIn("2 step(s)", submit.stdout)  # relax.yaml template has two steps
             self.assertTrue((root / "tmpl" / "relax_runs" / "1000_a" / "relax" / "step_02" / "INCAR").exists())
-            self.assertTrue((root / "summary.csv").exists())
+            self.assertTrue((root / "summary.xlsx").exists())
 
-            # a flag overrides the config value
+            # a flag overrides the config value (legacy --output-csv alias, csv suffix -> CSV)
             override = run_cli(["relax", "submit", "--dry-run", "--output-csv", "other.csv"], root)
             self.assertEqual(override.returncode, 0, override.stderr)
-            self.assertTrue((root / "other.csv").exists())
+            with (root / "other.csv").open(newline="", encoding="utf-8") as handle:
+                self.assertEqual(list(csv.DictReader(handle))[0]["status"], "prepared")
 
             collect = run_cli(["relax", "collect"], root)
             self.assertEqual(collect.returncode, 0, collect.stderr)
-            with (root / "summary.csv").open(newline="", encoding="utf-8") as handle:
-                rows = list(csv.DictReader(handle))
-            self.assertEqual(rows[0]["status"], "missing_outputs")
+            import openpyxl
+
+            sheet = openpyxl.load_workbook(root / "summary.xlsx")["relaxations"]
+            header = [cell.value for cell in sheet[1]]
+            first = dict(zip(header, [cell.value for cell in sheet[2]]))
+            self.assertEqual(first["status"], "missing_outputs")
+            self.assertEqual(first["n_molecules_initial"], 2)
 
     def test_config_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -78,6 +83,7 @@ class CliTests(unittest.TestCase):
             missing = run_cli(["relax", "submit", "--config", "min.yaml", "--dry-run"], root)
             self.assertNotEqual(missing.returncode, 0)
             self.assertIn("--structures-dir", missing.stderr)
+            self.assertIn("--output", missing.stderr)
             self.assertIn("vasptools.yaml", missing.stderr)
 
             none = run_cli(["relax", "submit", "--dry-run"], root)  # no config at all
@@ -96,7 +102,8 @@ class CliTests(unittest.TestCase):
             write_poscar(two_water_conformations(), work / "step_1_final" / "CONTCAR")
             legacy = run_cli(["legacy", "collect", "run2"], root)
             self.assertEqual(legacy.returncode, 0, legacy.stderr)
-            self.assertTrue((root / "run2_summary.csv").exists())
+            self.assertTrue((root / "run2_summary.xlsx").exists())
+            self.assertFalse((root / "run2_summary.csv").exists())
             self.assertTrue((root / "run2_relaxed" / "00001_POSCAR").exists())
 
             multi = run_cli(["multi", "--help"], root)

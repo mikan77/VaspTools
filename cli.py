@@ -24,7 +24,8 @@ CONFIG_NAME = "vasptools.yaml"
 RELAX_CONFIG_KEYS = (
     "structures_dir",
     "template_dir",
-    "output_csv",
+    "output",
+    "output_csv",  # legacy alias of output
     "output_root",
     "relaxed_dir",
     "relaxed_format",
@@ -37,7 +38,7 @@ RELAX_CONFIG_KEYS = (
     "potcar_mode",
     "require_kspacing",
 )
-RELAX_PATH_KEYS = ("structures_dir", "template_dir", "output_csv", "output_root", "relaxed_dir", "protocol")
+RELAX_PATH_KEYS = ("structures_dir", "template_dir", "output", "output_csv", "output_root", "relaxed_dir", "protocol")
 
 CONFIG_TEMPLATE = """\
 # vasptools.yaml — project settings for `vasptools relax submit|collect`.
@@ -45,7 +46,7 @@ CONFIG_TEMPLATE = """\
 
 structures_dir: structs        # POSCAR / 27_POSCAR / *.vasp / *.cif files to relax
 template_dir: tmpl             # POTCAR, INCAR, job_template.sh
-output_csv: summary.csv
+output: summary.xlsx           # .xlsx = Excel, .csv = plain CSV
 
 # Relaxation protocol: per-step INCAR tags (see relax.yaml). Comment out to run
 # a single step with the template INCAR as is, or set relax_steps: 2 for
@@ -95,6 +96,8 @@ def load_config(path: Path) -> dict[str, object]:
         if key in RELAX_PATH_KEYS:
             candidate = Path(str(value)).expanduser()
             value = str(candidate if candidate.is_absolute() else base / candidate)
+        if key == "output_csv":
+            key = "output"
         config[key] = value
     return config
 

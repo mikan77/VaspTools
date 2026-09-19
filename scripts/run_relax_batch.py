@@ -6,20 +6,19 @@ Example:
     --structures-dir /path/to/structures \
     --template-dir /path/to/template \
     --protocol /path/to/template/relax.yaml \
-    --output-csv /path/to/relax_summary.csv
+    --output /path/to/relax_summary.xlsx
 
   # after the jobs finished
   python run_relax_batch.py \
     --structures-dir /path/to/structures \
     --template-dir /path/to/template \
     --collect-only \
-    --output-csv /path/to/relax_summary.csv
+    --output /path/to/relax_summary.xlsx
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
@@ -32,6 +31,7 @@ if str(PROJECT_PARENT) not in sys.path:
 
 from VaspTools import FreeRelaxIncarPolicy, MechanicalPipeline, PipelineConfig, PipelineInputs
 from VaspTools.io.jobs import resolve_job_template_path
+from VaspTools.io.tables import write_table
 from VaspTools.workflows.relax import RelaxProtocol, load_relax_protocol
 from VaspTools.structures import load_poscar, write_poscar
 
@@ -71,7 +71,7 @@ CSV_COLUMNS = (
 )
 
 
-REQUIRED_SETTINGS = ("structures_dir", "template_dir", "output_csv")
+REQUIRED_SETTINGS = ("structures_dir", "template_dir", "output")
 
 
 def parse_args(
@@ -167,8 +167,10 @@ def parse_args(
         help="Prepare only; do not submit to sbatch.",
     )
     parser.add_argument(
+        "--output",
         "--output-csv",
-        help="Path to output CSV summary.",
+        dest="output",
+        help="Summary table path; .xlsx writes Excel (needs openpyxl), any other suffix writes CSV.",
     )
     parser.add_argument(
         "--require-kspacing",
@@ -193,21 +195,8 @@ def parse_args(
     return args
 
 
-def write_csv(rows: list[dict[str, object]], output_csv: Path) -> None:
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
-    with output_csv.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(CSV_COLUMNS))
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: _csv_value(row.get(key)) for key in CSV_COLUMNS})
-
-
-def _csv_value(value: object) -> object:
-    if value is None:
-        return ""
-    if isinstance(value, float):
-        return f"{value:.6f}"
-    return value
+def write_summary(rows: list[dict[str, object]], output: Path) -> None:
+    write_table(rows, CSV_COLUMNS, output, sheet="relaxations")
 
 
 def make_pipeline(
@@ -355,7 +344,7 @@ def main(
         Path(args.output_root).resolve() if args.output_root else template_dir / "relax_runs"
     )
     relaxed_dir = Path(args.relaxed_dir).resolve() if args.relaxed_dir else output_root / "relaxed"
-    output_csv = Path(args.output_csv).resolve()
+    output = Path(args.output).resolve()
     job_template = resolve_job_template_path(template_dir)
 
     rows: list[dict[str, object]] = []
@@ -376,9 +365,9 @@ def main(
                     relaxed_dir=relaxed_dir,
                 )
             )
-        write_csv(rows, output_csv)
+        write_summary(rows, output)
         completed = sum(1 for row in rows if row.get("status") == "completed")
-        print(f"Collected {len(rows)} runs ({completed} completed); wrote {output_csv}")
+        print(f"Collected {len(rows)} runs ({completed} completed); wrote {output}")
         print(f"Relaxed structures: {relaxed_dir}")
         return
 
@@ -474,14 +463,14 @@ def main(
             label = "dry-run" if args.dry_run else f"job {job_id or '?'}"
             print(f"{run_name}: {relax_steps} step(s) [{', '.join(step_names)}], {label}")
 
-    write_csv(rows, output_csv)
+    write_summary(rows, output)
     prepared = len(structure_files) - skipped
     summary = f"Prepared {prepared} structures"
     if skipped:
         summary += f", skipped {skipped} already submitted"
     if failed:
         summary += f", {failed} submission(s) FAILED"
-    print(f"{summary}; wrote {len(rows)} rows to {output_csv}")
+    print(f"{summary}; wrote {len(rows)} rows to {output}")
     if not args.dry_run:
         print("Run again with --collect-only after the jobs finish.")
     if failed:

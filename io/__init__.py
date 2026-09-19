@@ -20,6 +20,7 @@ __all__ = [
     "resolve_job_template_path",
     "submit_sbatch",
     "validate_kspacing_incar",
+    "write_table",
 ]
 
 
@@ -77,6 +78,10 @@ def __getattr__(name: str) -> Any:
         from .runtime import read_runtime_seconds
 
         exports = {"read_runtime_seconds": read_runtime_seconds}
+    elif name == "write_table":
+        from .tables import write_table
+
+        exports = {"write_table": write_table}
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
