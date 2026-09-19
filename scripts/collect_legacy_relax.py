@@ -31,6 +31,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_PARENT = ROOT.parent
@@ -77,12 +78,16 @@ BASE_COLUMNS = (
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Collect legacy step_N_final relaxations into an XLSX table and a folder of CONTCARs."
     )
     parser.add_argument("--runs-dir", required=True, help="Directory with calc_XXXXX folders (e.g. run2).")
-    parser.add_argument("--xlsx", required=True, help="Output XLSX path (a CSV with the same stem is written too).")
+    parser.add_argument(
+        "--xlsx",
+        default=None,
+        help="Output XLSX path; a CSV with the same stem is written too (default: <runs-dir>_summary.xlsx).",
+    )
     parser.add_argument(
         "--relaxed-dir",
         default=None,
@@ -97,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bond-tolerance", type=float, default=1.20, help="Covalent-radius factor for molecule counting (default 1.20)."
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def structure_index(calc_dir: Path) -> str:
@@ -313,12 +318,12 @@ def write_outputs(rows: list[dict[str, object]], steps: dict[str, dict[int, floa
     book.save(xlsx)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
     runs_dir = Path(args.runs_dir).resolve()
     if not runs_dir.is_dir():
         raise SystemExit(f"Not a directory: {runs_dir}")
-    xlsx = Path(args.xlsx).resolve()
+    xlsx = Path(args.xlsx).resolve() if args.xlsx else runs_dir.parent / f"{runs_dir.name}_summary.xlsx"
     relaxed_dir = (
         Path(args.relaxed_dir).resolve() if args.relaxed_dir else runs_dir.parent / f"{runs_dir.name}_relaxed"
     )

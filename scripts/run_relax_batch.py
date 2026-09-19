@@ -23,6 +23,7 @@ import csv
 import json
 import sys
 from pathlib import Path
+from typing import Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_PARENT = ROOT.parent
@@ -70,18 +71,23 @@ CSV_COLUMNS = (
 )
 
 
-def parse_args() -> argparse.Namespace:
+REQUIRED_SETTINGS = ("structures_dir", "template_dir", "output_csv")
+
+
+def parse_args(
+    argv: Sequence[str] | None = None,
+    *,
+    config_defaults: Mapping[str, object] | None = None,
+) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Relax many structures on SLURM and build a before/after summary table."
     )
     parser.add_argument(
         "--structures-dir",
-        required=True,
         help="Directory with POSCAR-like files (POSCAR, 27_POSCAR, *.vasp) and/or CIF files.",
     )
     parser.add_argument(
         "--template-dir",
-        required=True,
         help="Directory with POTCAR, INCAR (ISIF/IBRION/NSW as you want them) and a .sh job template.",
     )
     parser.add_argument(
@@ -162,7 +168,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-csv",
-        required=True,
         help="Path to output CSV summary.",
     )
     parser.add_argument(
@@ -177,7 +182,15 @@ def parse_args() -> argparse.Namespace:
         dest="require_kspacing",
         help="Allow jobs without explicit KSPACING in INCAR.",
     )
-    return parser.parse_args()
+    if config_defaults:
+        # Values from vasptools.yaml act as defaults; explicit flags still win.
+        parser.set_defaults(**dict(config_defaults))
+    args = parser.parse_args(argv)
+    missing = [name for name in REQUIRED_SETTINGS if getattr(args, name) in (None, "")]
+    if missing:
+        flags = ", ".join("--" + name.replace("_", "-") for name in missing)
+        parser.error(f"missing {flags} (pass the flag or set it in vasptools.yaml)")
+    return args
 
 
 def write_csv(rows: list[dict[str, object]], output_csv: Path) -> None:
@@ -315,8 +328,12 @@ def collect_run(
     return row
 
 
-def main() -> None:
-    args = parse_args()
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    config_defaults: Mapping[str, object] | None = None,
+) -> None:
+    args = parse_args(argv, config_defaults=config_defaults)
     structures_dir = Path(args.structures_dir).resolve()
     template_dir = Path(args.template_dir).resolve()
 

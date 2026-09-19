@@ -79,6 +79,7 @@ API `molecules` извлекает из POSCAR/CIF все молекулы ис�
 ```text
 VaspTools/
   __init__.py             # Public lazy API: from VaspTools import ...
+  cli.py                  # команда `vasptools` (relax / legacy / multi / scan)
   core/
     pipeline.py           # MechanicalPipeline high-level coordinator
     factory.py            # VaspCalculationFactory
@@ -403,6 +404,43 @@ Elastic reports записываются сюда:
 mechanics_run/reports/elastic_tensor.json
 mechanics_run/reports/mechanical_properties.json
 ```
+
+## Командная строка: `vasptools`
+
+После `pip install -e .` появляется команда `vasptools` (без установки —
+`python -m VaspTools.cli ...`). В повседневной работе флаги не нужны:
+настройки лежат в `vasptools.yaml` рядом с данными.
+
+```bash
+mkdir series1 && cd series1
+vasptools relax init          # создаст шаблоны vasptools.yaml + relax.yaml
+# структуры -> structs/, POTCAR + INCAR + job_template.sh -> tmpl/
+vasptools relax submit --dry-run   # только подготовить, посмотреть tmpl/relax_runs/
+vasptools relax submit             # один sbatch на структуру
+vasptools relax collect            # после расчетов: summary.csv + relaxed/
+```
+
+`vasptools.yaml` (пути относительно файла; любой флаг `run_relax_batch.py`
+в командной строке имеет приоритет):
+
+```yaml
+structures_dir: structs
+template_dir: tmpl
+output_csv: summary.csv
+protocol: relax.yaml        # или relax_steps: 2, или ничего — один шаг
+# output_root, relaxed_dir, relaxed_format, index_start, potcar_mode,
+# symprec, bond_tolerance, job_script_name, require_kspacing
+```
+
+Остальные команды:
+
+```bash
+vasptools legacy collect run2            # старые step_N_final прогоны -> run2_summary.xlsx + run2_relaxed/
+vasptools multi --structures-dir ... --template-dir ... --mode both --output-csv ...   # = run_multi_scan.py
+vasptools scan  --workdir ... --scan Zab=-1:-3:-0.1 --output-csv ...                  # = run_param_scan.py
+```
+
+Скрипты в `scripts/` продолжают работать как раньше.
 
 ## CLI workflows
 

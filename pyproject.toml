@@ -39,6 +39,9 @@ dependencies = [
   "pyyaml",
 ]
 
+[project.scripts]
+vasptools = "VaspTools.cli:main"
+
 [project.optional-dependencies]
 xlsx = ["openpyxl"]
 
@@ -57,6 +60,7 @@ packages = [
   "VaspTools.workflows",
   "VaspTools.clusters",
   "VaspTools.molecules",
+  "VaspTools.scripts",
 ]
 package-dir = { "VaspTools" = "." }
 include-package-data = false

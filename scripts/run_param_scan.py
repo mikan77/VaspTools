@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+from typing import Sequence
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +27,7 @@ from VaspTools.io.jobs import resolve_job_template_path
 from VaspTools.scripts._scan_utils import parse_scan_specs, read_result_row, flatten_rows
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run INCAR parameter scan for one structure.")
     parser.add_argument(
         "--workdir",
@@ -83,7 +84,7 @@ def parse_args() -> argparse.Namespace:
         dest="require_kspacing",
         help="Allow jobs without explicit KSPACING in INCAR.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def write_csv(rows: list[dict[str, object]], output_csv: Path) -> None:
@@ -99,8 +100,8 @@ def write_csv(rows: list[dict[str, object]], output_csv: Path) -> None:
             writer.writerow({key: row.get(key, "") for key in header})
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
     workdir = Path(args.workdir).resolve()
     output_csv = Path(args.output_csv).resolve()
 

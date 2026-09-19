@@ -78,6 +78,7 @@ geometry and symmetry representative. `fingerprint_tolerance_A`,
 ```text
 VaspTools/
   __init__.py             # Public lazy API: from VaspTools import ...
+  cli.py                  # `vasptools` command (relax / legacy / multi / scan)
   core/
     pipeline.py           # MechanicalPipeline high-level coordinator
     factory.py            # VaspCalculationFactory
@@ -400,6 +401,43 @@ Elastic reports are written to:
 mechanics_run/reports/elastic_tensor.json
 mechanics_run/reports/mechanical_properties.json
 ```
+
+## Command line: `vasptools`
+
+After `pip install -e .` the `vasptools` command is available (without an
+install use `python -m VaspTools.cli ...`). Day-to-day work needs no flags:
+settings live in a `vasptools.yaml` next to your data.
+
+```bash
+mkdir series1 && cd series1
+vasptools relax init          # writes vasptools.yaml + relax.yaml templates
+# put structures into structs/, POTCAR + INCAR + job_template.sh into tmpl/
+vasptools relax submit --dry-run   # prepare only, inspect tmpl/relax_runs/
+vasptools relax submit             # one sbatch per structure
+vasptools relax collect            # after the jobs: summary.csv + relaxed/
+```
+
+`vasptools.yaml` (paths are relative to the file; any `run_relax_batch.py`
+flag given on the command line overrides it):
+
+```yaml
+structures_dir: structs
+template_dir: tmpl
+output_csv: summary.csv
+protocol: relax.yaml        # or relax_steps: 2, or nothing for one step
+# output_root, relaxed_dir, relaxed_format, index_start, potcar_mode,
+# symprec, bond_tolerance, job_script_name, require_kspacing
+```
+
+Other commands:
+
+```bash
+vasptools legacy collect run2            # old step_N_final runs -> run2_summary.xlsx + run2_relaxed/
+vasptools multi --structures-dir ... --template-dir ... --mode both --output-csv ...   # = run_multi_scan.py
+vasptools scan  --workdir ... --scan Zab=-1:-3:-0.1 --output-csv ...                  # = run_param_scan.py
+```
+
+The scripts in `scripts/` keep working as before.
 
 ## CLI workflows
 
