@@ -13,6 +13,7 @@ workflow для расчета механических свойств. Осно
   - `scripts/run_param_scan.py`
   - `scripts/run_multi_scan.py`
   - `scripts/run_relax_batch.py`
+  - `scripts/collect_legacy_relax.py`
 - нет PyInstaller-бинарника;
 - `KPOINTS` не создается;
 - физические параметры из твоего `INCAR` не заменяются автоматически, кроме
@@ -113,6 +114,7 @@ VaspTools/
     run_param_scan.py      # CLI для скана параметров одной структуры
     run_multi_scan.py      # CLI для пакета структур (eos/elastic)
     run_relax_batch.py     # CLI для батч-релаксации с таблицей до/после
+    collect_legacy_relax.py # сбор старых step_N_final прогонов в XLSX + CONTCAR
     _scan_utils.py         # CLI helpers
   tests/
     test_core.py
@@ -666,6 +668,34 @@ pipe.submit([pipe.prepare_relax_chain(protocol=protocol)])
 # или без YAML:
 pipe.prepare_relax_chain(step_overrides=[{"ISIF": 2, "NSW": 60}, {"ISIF": 3, "EDIFFG": -0.005}])
 ```
+
+### `collect_legacy_relax.py` — сбор результатов старого пайплайна `step_N_final`
+
+Для папок, созданных прежним многошаговым драйвером
+(`run2/calc_XXXXX/calc_XXXXX/step_N_final/…`), скрипт строит одну таблицу и
+собирает последние `CONTCAR` всех запусков:
+
+```bash
+python scripts/collect_legacy_relax.py \
+  --runs-dir /path/to/run2 \
+  --xlsx /path/to/run2_summary.xlsx \
+  --relaxed-dir /path/to/run2_relaxed        # по умолчанию <runs-dir>_relaxed
+```
+
+- `run2_summary.xlsx` (лист `relaxations` + лист `steps`, плюс та же
+  таблица в `.csv`): `idx`, `status`, `converged`, `steps_finished`,
+  `energy_initial_eV` (первый `TOTEN` шага 1), `energy_final_eV` (последний
+  `TOTEN` последнего завершенного шага), `energy_stepN_eV` по шагам,
+  `energy_final_per_molecule_eV`, `n_molecules_*`, `space_group_*`,
+  `volume_*`, `delta_volume_percent`, `density_*`, `runtime_sec`, `relaxed_path`;
+- `run2_relaxed/<idx>_POSCAR` — точные копии последнего `CONTCAR`
+  (`00046_POSCAR`, …); по умолчанию экспортируются только `completed`, с
+  `--include-unfinished` — все.
+
+Рабочая папка, где `OUTCAR` без финального блока timing, считается
+незавершенным дополнительным шагом (`status = running_or_killed`); энергии
+тогда берутся из последнего заархивированного `step_N_final`. Для XLSX нужен
+`openpyxl` (`pip install "VaspTools[xlsx]"`); без него пишется только CSV.
 
 ## API Reference
 

@@ -13,6 +13,7 @@ The project is API-first and includes lightweight CLI scripts for common batch w
   - `scripts/run_param_scan.py`
   - `scripts/run_multi_scan.py`
   - `scripts/run_relax_batch.py`
+  - `scripts/collect_legacy_relax.py`
 - no PyInstaller binary;
 - no generated `KPOINTS`;
 - no automatic replacement of your physical VASP settings except the workflow
@@ -98,6 +99,7 @@ VaspTools/
     run_param_scan.py      # CLI for one-structure parameter scan
     run_multi_scan.py      # CLI for many structures (eos/elastic)
     run_relax_batch.py     # CLI for batch relaxation with before/after summary
+    collect_legacy_relax.py # harvest old step_N_final runs into XLSX + CONTCARs
     _scan_utils.py         # CLI helpers
   analysis/
     eos.py                # Birch-Murnaghan EOS fitting
@@ -662,6 +664,34 @@ pipe.submit([pipe.prepare_relax_chain(protocol=protocol)])
 # or without YAML:
 pipe.prepare_relax_chain(step_overrides=[{"ISIF": 2, "NSW": 60}, {"ISIF": 3, "EDIFFG": -0.005}])
 ```
+
+### `collect_legacy_relax.py` — harvest the old `step_N_final` pipeline
+
+For folders produced by the previous multi-step driver
+(`run2/calc_XXXXX/calc_XXXXX/step_N_final/…`) this script builds one table and
+gathers the last `CONTCAR` of every run:
+
+```bash
+python scripts/collect_legacy_relax.py \
+  --runs-dir /path/to/run2 \
+  --xlsx /path/to/run2_summary.xlsx \
+  --relaxed-dir /path/to/run2_relaxed        # default: <runs-dir>_relaxed
+```
+
+- `run2_summary.xlsx` (sheet `relaxations` + sheet `steps`, and the same
+  table as `.csv`): `idx`, `status`, `converged`, `steps_finished`,
+  `energy_initial_eV` (first `TOTEN` of step 1), `energy_final_eV` (last
+  `TOTEN` of the last finished step), `energy_stepN_eV` per step,
+  `energy_final_per_molecule_eV`, `n_molecules_*`, `space_group_*`,
+  `volume_*`, `delta_volume_percent`, `density_*`, `runtime_sec`, `relaxed_path`;
+- `run2_relaxed/<idx>_POSCAR` — verbatim copies of the last `CONTCAR`
+  (`00046_POSCAR`, …); only `completed` runs are exported unless
+  `--include-unfinished` is given.
+
+A working directory whose `OUTCAR` lacks the final timing block is treated as
+an unfinished extra step (`status = running_or_killed`); energies then come
+from the last archived `step_N_final`. XLSX output needs `openpyxl`
+(`pip install "VaspTools[xlsx]"`); without it only the CSV is written.
 
 ## API Reference
 

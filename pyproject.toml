@@ -39,6 +39,9 @@ dependencies = [
   "pyyaml",
 ]
 
+[project.optional-dependencies]
+xlsx = ["openpyxl"]
+
 [project.urls]
 Homepage = "https://github.com/mihailaveranov/VaspTools"
 Issues = "https://github.com/mihailaveranov/VaspTools/issues"
