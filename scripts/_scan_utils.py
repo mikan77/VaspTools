@@ -12,7 +12,21 @@ from VaspTools.core import MechanicalPipeline, PipelineConfig, PipelineInputs
 from VaspTools.io.results import read_energy, read_volume
 from VaspTools.structures import load_poscar, write_poscar
 
-from ._scan_runtime import read_runtime_seconds
+from VaspTools.io.runtime import read_runtime_seconds
+from VaspTools.molecules import count_molecules
+
+
+POSCAR_LIKE_NAMES = ("POSCAR", "CONTCAR")
+
+
+def is_poscar_like_name(name: str) -> bool:
+    """Return True for names such as ``POSCAR``, ``27_POSCAR`` or ``CONTCAR_x``."""
+
+    upper = name.upper()
+    return any(
+        upper == token or upper.startswith(f"{token}_") or upper.endswith(f"_{token}")
+        for token in POSCAR_LIKE_NAMES
+    )
 
 
 def iter_structure_files(
@@ -20,7 +34,12 @@ def iter_structure_files(
     *,
     extensions: Iterable[str] | None = None,
 ) -> list[Path]:
-    """Collect supported structure files sorted by name."""
+    """Collect supported structure files sorted by name.
+
+    Files are accepted by extension (``.vasp``, ``.poscar``, ``.cif``,
+    ``.cif.gz``, ``.vasp.gz``) or by POSCAR-like name (``POSCAR``,
+    ``27_POSCAR``, ``CONTCAR``).
+    """
 
     root = Path(directory)
     if not root.is_dir():
@@ -31,14 +50,13 @@ def iter_structure_files(
         for ext in (extensions or (".vasp", ".poscar", ".cif", ".cif.gz"))
     }
     extra_suffixes = {".cif.gz", ".vasp.gz"}
+    suffixes = tuple(allowed.union(extra_suffixes))
     files = [
         path
         for path in sorted(root.iterdir())
         if path.is_file()
-        and (
-            path.name.lower().endswith(tuple(allowed.union(extra_suffixes)))
-            and not path.name.startswith(".")
-        )
+        and not path.name.startswith(".")
+        and (path.name.lower().endswith(suffixes) or is_poscar_like_name(path.name))
     ]
     return files
 
@@ -287,3 +305,40 @@ def flatten_rows(rows: list[dict[str, object]]) -> tuple[list[str], list[dict[st
     for key in sorted(params):
         ordered_keys.append(key)
     return ordered_keys, rows
+
+
+def describe_structure(
+    structure: Structure,
+    *,
+    symprec: float = 0.05,
+    angle_tolerance: float = 5.0,
+    bond_tolerance_factor: float = 1.20,
+) -> dict[str, object]:
+    """Summarize a structure: composition, molecule count, symmetry, volume, density."""
+
+    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+    try:
+        n_molecules: int | None = count_molecules(
+            structure, bond_tolerance_factor=bond_tolerance_factor
+        )
+    except ValueError:
+        n_molecules = None
+
+    try:
+        analyzer = SpacegroupAnalyzer(structure, symprec=symprec, angle_tolerance=angle_tolerance)
+        space_group = analyzer.get_space_group_symbol()
+        space_group_number: int | None = analyzer.get_space_group_number()
+    except Exception:
+        space_group = "Unknown"
+        space_group_number = None
+
+    return {
+        "n_atoms": len(structure),
+        "formula": structure.composition.reduced_formula,
+        "n_molecules": n_molecules,
+        "space_group": space_group,
+        "space_group_number": space_group_number,
+        "volume_A3": float(structure.volume),
+        "density_g_cm3": float(structure.density),
+    }

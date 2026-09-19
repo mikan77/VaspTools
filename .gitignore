@@ -50,6 +50,9 @@ reports/
 eos/
 elastic/
 static_only/
+relax/
+relax_runs/
+multi_runs/
 test/ 
 test_camp/
 # Logs and temporary files

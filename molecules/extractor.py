@@ -39,6 +39,95 @@ _DEFAULT_COVALENT_RADII = {
 }
 
 
+def _covalent_radius_for(symbol: str, covalent_radii: Mapping[str, float]) -> float:
+    if symbol in covalent_radii:
+        return float(covalent_radii[symbol])
+    radius = Element(symbol).covalent_radius
+    if radius is None:
+        raise ValueError(f"No covalent radius is available for element {symbol}.")
+    return float(radius)
+
+
+def find_molecular_fragments(
+    structure: Structure,
+    *,
+    bond_tolerance_factor: float = 1.20,
+    covalent_radii: Mapping[str, float] | None = None,
+) -> list[tuple[tuple[int, ...], dict[int, tuple[int, int, int]]]]:
+    """Split a periodic structure into finite covalently bonded fragments.
+
+    Two atoms are bonded when their distance is below the sum of covalent
+    radii times ``bond_tolerance_factor``. Returns one ``(members, offsets)``
+    pair per fragment: ``members`` are sorted site indices and ``offsets`` the
+    lattice translation that unwraps each site next to the fragment root.
+    Raises ``ValueError`` when the bonding graph is infinite (a framework).
+    """
+
+    radii_table = {**_DEFAULT_COVALENT_RADII, **(covalent_radii or {})}
+    n_sites = len(structure)
+    adjacency: dict[int, list[tuple[int, tuple[int, int, int]]]] = {
+        index: [] for index in range(n_sites)
+    }
+    radii = [_covalent_radius_for(site.specie.symbol, radii_table) for site in structure.sites]
+    search_radius = max(radii) * 2.0 * bond_tolerance_factor
+
+    for index, site in enumerate(structure.sites):
+        for neighbor in structure.get_neighbors(site, search_radius):
+            other = int(neighbor.index)
+            image = tuple(int(value) for value in neighbor.image)
+            if other == index and image == (0, 0, 0):
+                continue
+            cutoff = (radii[index] + radii[other]) * bond_tolerance_factor
+            if float(neighbor.nn_distance) > cutoff:
+                continue
+            adjacency[index].append((other, image))
+            adjacency[other].append((index, tuple(-value for value in image)))
+
+    visited: set[int] = set()
+    fragments: list[tuple[tuple[int, ...], dict[int, tuple[int, int, int]]]] = []
+    for root in range(n_sites):
+        if root in visited:
+            continue
+        offsets: dict[int, tuple[int, int, int]] = {root: (0, 0, 0)}
+        queue: deque[int] = deque([root])
+        visited.add(root)
+        while queue:
+            current = queue.popleft()
+            for neighbor, image in adjacency[current]:
+                candidate = tuple(
+                    int(value)
+                    for value in np.asarray(offsets[current], dtype=int) + np.asarray(image)
+                )
+                if neighbor not in offsets:
+                    offsets[neighbor] = candidate
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+                elif offsets[neighbor] != candidate:
+                    raise ValueError(
+                        "The covalent graph is periodic/infinite; "
+                        "finite molecular fragments cannot be extracted."
+                    )
+        fragments.append((tuple(sorted(offsets)), offsets))
+    return fragments
+
+
+def count_molecules(
+    structure: Structure,
+    *,
+    bond_tolerance_factor: float = 1.20,
+    covalent_radii: Mapping[str, float] | None = None,
+) -> int:
+    """Return the number of finite molecules in a periodic structure."""
+
+    return len(
+        find_molecular_fragments(
+            structure,
+            bond_tolerance_factor=bond_tolerance_factor,
+            covalent_radii=covalent_radii,
+        )
+    )
+
+
 @dataclass
 class _MoleculeRecord:
     instance_id: str
@@ -193,51 +282,14 @@ class MolecularStructureExtractor:
 
     def _identify_molecules(self) -> None:
         assert self.structure is not None
-        n_sites = len(self.structure)
-        adjacency: dict[int, list[tuple[int, tuple[int, int, int]]]] = {
-            index: [] for index in range(n_sites)
-        }
-        radii = [self._covalent_radius(site.specie.symbol) for site in self.structure.sites]
-        search_radius = max(radii) * 2.0 * self.config.bond_tolerance_factor
+        fragments = find_molecular_fragments(
+            self.structure,
+            bond_tolerance_factor=self.config.bond_tolerance_factor,
+            covalent_radii=self.covalent_radii,
+        )
 
-        for index, site in enumerate(self.structure.sites):
-            for neighbor in self.structure.get_neighbors(site, search_radius):
-                other = int(neighbor.index)
-                image = tuple(int(value) for value in neighbor.image)
-                if other == index and image == (0, 0, 0):
-                    continue
-                cutoff = (radii[index] + radii[other]) * self.config.bond_tolerance_factor
-                if float(neighbor.nn_distance) > cutoff:
-                    continue
-                adjacency[index].append((other, image))
-                adjacency[other].append((index, tuple(-value for value in image)))
-
-        visited: set[int] = set()
         records: list[_MoleculeRecord] = []
-        for root in range(n_sites):
-            if root in visited:
-                continue
-            offsets = {root: (0, 0, 0)}
-            queue: deque[int] = deque([root])
-            visited.add(root)
-            while queue:
-                current = queue.popleft()
-                for neighbor, image in adjacency[current]:
-                    candidate = tuple(
-                        int(value)
-                        for value in np.asarray(offsets[current], dtype=int) + np.asarray(image)
-                    )
-                    if neighbor not in offsets:
-                        offsets[neighbor] = candidate
-                        visited.add(neighbor)
-                        queue.append(neighbor)
-                    elif offsets[neighbor] != candidate:
-                        raise ValueError(
-                            "The covalent graph is periodic/infinite; "
-                            "finite molecular fragments cannot be extracted."
-                        )
-
-            members = tuple(sorted(offsets))
+        for members, offsets in fragments:
             species = tuple(self.structure[index].specie.symbol for index in members)
             fractional = np.asarray(
                 [

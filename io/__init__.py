@@ -12,6 +12,7 @@ __all__ = [
     "make_stage_incar",
     "parse_sbatch_job_id",
     "read_energy",
+    "read_runtime_seconds",
     "read_stress",
     "read_volume",
     "render_job_script",
@@ -72,6 +73,10 @@ def __getattr__(name: str) -> Any:
         from .discovery import discover_calculations
 
         exports = {"discover_calculations": discover_calculations}
+    elif name == "read_runtime_seconds":
+        from .runtime import read_runtime_seconds
+
+        exports = {"read_runtime_seconds": read_runtime_seconds}
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

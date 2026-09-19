@@ -1,6 +1,6 @@
 """Molecular geometry and crystal-symmetry extraction API."""
 
-from .extractor import MolecularStructureExtractor
+from .extractor import MolecularStructureExtractor, count_molecules, find_molecular_fragments
 from .models import (
     ExtractionResult,
     GeometryType,
@@ -18,4 +18,6 @@ __all__ = [
     "MoleculeOccurrence",
     "SymmetryMapping",
     "SymmetryUniqueMolecule",
+    "count_molecules",
+    "find_molecular_fragments",
 ]
