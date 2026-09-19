@@ -36,6 +36,7 @@ dependencies = [
   "numpy",
   "scipy",
   "pymatgen",
+  "pyyaml",
 ]
 
 [project.urls]

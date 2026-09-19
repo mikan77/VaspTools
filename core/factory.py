@@ -50,6 +50,27 @@ class VaspCalculationFactory:
         self.template_incar = template_incar or load_incar(inputs.incar)
         self.incar_policy.validate_template(self.template_incar)
 
+    def _place_potcar(self, target: Path) -> None:
+        """Copy, hard-link or symlink the shared POTCAR into a calculation directory."""
+
+        source = self.inputs.potcar
+        # Never write through an existing link: a copy onto a symlink would
+        # overwrite the shared template POTCAR.
+        if target.is_symlink() or target.exists():
+            target.unlink()
+
+        mode = self.config.potcar_mode
+        if mode == "symlink":
+            target.symlink_to(source.resolve())
+            return
+        if mode == "hardlink":
+            try:
+                os.link(source, target)
+                return
+            except OSError:
+                pass  # different filesystem or unsupported: fall back to a copy
+        shutil.copy2(source, target)
+
     def write_metadata(self, directory: str | Path, metadata: dict[str, object]) -> None:
         """Write calculation metadata."""
 
@@ -94,7 +115,7 @@ class VaspCalculationFactory:
 
         job_name = sanitize_job_name(f"{self.config.name}_{name}")
         write_poscar(structure, directory / "POSCAR")
-        shutil.copy2(self.inputs.potcar, directory / "POTCAR")
+        self._place_potcar(directory / "POTCAR")
 
         incar = self.incar_policy.make_incar(
             self.template_incar,

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+from typing import Sequence
 
 
 JOB_NAME_PLACEHOLDERS = (
@@ -131,6 +132,53 @@ def render_two_stage_job_script(
         '(cd "$STATIC_DIR" && bash -e "$STATIC_STAGE")',
         "",
     ]
+    return "\n".join(driver)
+
+
+def render_chain_job_script(
+    template: str,
+    job_name: str,
+    *,
+    stage_dirs: Sequence[str],
+    stage_scripts: Sequence[str],
+) -> str:
+    """Render one SLURM driver that runs several VASP stages in sequence.
+
+    ``stage_dirs`` are directories relative to the driver location and
+    ``stage_scripts`` the shell script to execute inside each of them. After
+    every stage except the last, the driver checks for a non-empty ``CONTCAR``
+    and copies it to the next stage's ``POSCAR``. Only the shebang and
+    ``#SBATCH`` directives of the template are copied, so the allocation is
+    requested once.
+    """
+
+    if not stage_dirs:
+        raise ValueError("stage_dirs must contain at least one stage.")
+    if len(stage_dirs) != len(stage_scripts):
+        raise ValueError("stage_dirs and stage_scripts must have the same length.")
+
+    rendered = render_job_script(template, job_name)
+    directives = [line for line in rendered.splitlines() if line.lstrip().startswith("#SBATCH")]
+
+    driver = [
+        "#!/bin/bash",
+        *directives,
+        "",
+        "set -euo pipefail",
+        'SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+        "",
+    ]
+    for index, (directory, script) in enumerate(zip(stage_dirs, stage_scripts)):
+        dir_token = shlex.quote(directory)
+        script_token = shlex.quote(script)
+        driver.append(f'STAGE_DIR="$SCRIPT_DIR"/{dir_token}')
+        driver.append(f'(cd "$STAGE_DIR" && bash -e "$STAGE_DIR"/{script_token})')
+        if index + 1 < len(stage_dirs):
+            next_token = shlex.quote(stage_dirs[index + 1])
+            driver.append('test -s "$STAGE_DIR/CONTCAR"')
+            driver.append(f'test -d "$SCRIPT_DIR"/{next_token}')
+            driver.append(f'cp "$STAGE_DIR/CONTCAR" "$SCRIPT_DIR"/{next_token}/POSCAR')
+        driver.append("")
     return "\n".join(driver)
 
 

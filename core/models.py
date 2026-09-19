@@ -16,6 +16,9 @@ class PipelineInputs:
     job_template: Path
 
 
+POTCAR_MODES = ("copy", "hardlink", "symlink")
+
+
 @dataclass(frozen=True)
 class PipelineConfig:
     """Workflow configuration."""
@@ -27,6 +30,14 @@ class PipelineConfig:
     job_script_name: str = "job.sh"
     require_kspacing: bool = True
     vasp_kbar_to_gpa: float = -0.1
+    potcar_mode: str = "copy"
+    """How POTCAR is placed in each calculation directory: ``copy``, ``hardlink``
+    (same content, no extra disk space; falls back to copy across filesystems) or
+    ``symlink``."""
+
+    def __post_init__(self) -> None:
+        if self.potcar_mode not in POTCAR_MODES:
+            raise ValueError(f"potcar_mode must be one of {POTCAR_MODES}, got {self.potcar_mode!r}.")
 
 
 @dataclass(frozen=True)

@@ -15,6 +15,7 @@ from ..workflows.base import WorkflowMode
 from ..workflows.elastic import ElasticMode
 from ..workflows.eos import EOSMode
 from ..workflows.param_scan import ParamScanMode
+from ..workflows.relax import RelaxMode, RelaxProtocol
 from .factory import VaspCalculationFactory
 from .models import Calculation, PipelineConfig, PipelineInputs
 from .policies import IncarPolicy
@@ -57,9 +58,11 @@ class MechanicalPipeline:
         self.param_scan = ParamScanMode(
             inputs=self.inputs, config=self.config, factory=self.factory
         )
+        self.relax = RelaxMode(inputs=self.inputs, config=self.config, factory=self.factory)
         self.register_mode("eos", self.eos)
         self.register_mode("elastic", self.elastic)
         self.register_mode("param_scan", self.param_scan)
+        self.register_mode("relax", self.relax)
         if modes:
             for name, mode in modes.items():
                 self.register_mode(name, mode)
@@ -79,6 +82,7 @@ class MechanicalPipeline:
         input_job_template: str | None = None,
         require_kspacing: bool = True,
         vasp_kbar_to_gpa: float = -0.1,
+        potcar_mode: str = "copy",
         incar_policy: IncarPolicy | None = None,
         runner: CalculationRunner | None = None,
     ) -> "MechanicalPipeline":
@@ -99,6 +103,7 @@ class MechanicalPipeline:
             job_script_name=job_script_name,
             require_kspacing=require_kspacing,
             vasp_kbar_to_gpa=vasp_kbar_to_gpa,
+            potcar_mode=potcar_mode,
         )
         return cls(inputs, config, incar_policy=incar_policy, runner=runner)
 
@@ -121,6 +126,7 @@ class MechanicalPipeline:
             job_script_name=config.job_script_name,
             require_kspacing=config.require_kspacing,
             vasp_kbar_to_gpa=config.vasp_kbar_to_gpa,
+            potcar_mode=config.potcar_mode,
         )
 
     def _validate_inputs(self) -> None:
@@ -258,6 +264,31 @@ class MechanicalPipeline:
         """Collect parameter-scan result rows."""
 
         return self.param_scan.collect_results()
+
+    def prepare_relax_chain(
+        self,
+        *,
+        steps: int | None = None,
+        protocol: RelaxProtocol | None = None,
+        step_overrides: Iterable[Mapping[str, object]] | None = None,
+    ) -> Calculation:
+        """Prepare chained free relaxations of the reference structure.
+
+        ``protocol`` (see ``load_relax_protocol``) or ``step_overrides`` give
+        per-step INCAR tags. Use ``incar_policy=FreeRelaxIncarPolicy()`` if the
+        relaxation should keep ``ISIF``/``IBRION``/``NSW`` from the user INCAR.
+        """
+
+        return self.relax.prepare(
+            steps=steps,
+            protocol=protocol,
+            step_overrides=None if step_overrides is None else list(step_overrides),
+        )
+
+    def collect_relax_chain(self) -> dict[str, object]:
+        """Collect energies and final structure of the relaxation chain."""
+
+        return self.relax.collect()
 
     def collect_elastic_points(self) -> list[StrainStressPoint]:
         """Collect strain/stress points."""

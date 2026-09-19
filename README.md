@@ -12,6 +12,7 @@ The project is API-first and includes lightweight CLI scripts for common batch w
 - command-line helper scripts are available:
   - `scripts/run_param_scan.py`
   - `scripts/run_multi_scan.py`
+  - `scripts/run_relax_batch.py`
 - no PyInstaller binary;
 - no generated `KPOINTS`;
 - no automatic replacement of your physical VASP settings except the workflow
@@ -19,7 +20,7 @@ The project is API-first and includes lightweight CLI scripts for common batch w
 
 ## What It Calculates
 
-The API has three workflow modes:
+The API has four workflow modes:
 
 `eos` branch:
 
@@ -40,6 +41,13 @@ The API has three workflow modes:
 - calculates bulk modulus, shear modulus, Young's modulus, Poisson ratio,
   universal elastic anisotropy, linear compressibility, and a generic
   mechanical stability check.
+
+`relax` branch:
+
+- chains one or more free relaxations of one structure inside a single SLURM job;
+- keeps `ISIF`/`IBRION`/`NSW` from your `INCAR` when used with `FreeRelaxIncarPolicy`;
+- reports initial/final energy, convergence and the final `CONTCAR`;
+- drives the `run_relax_batch.py` CLI (before/after table for many structures).
 
 `param_scan` branch:
 
@@ -73,12 +81,13 @@ VaspTools/
     pipeline.py           # MechanicalPipeline high-level coordinator
     factory.py            # VaspCalculationFactory
     models.py             # PipelineInputs, PipelineConfig, Calculation
-    policies.py           # IncarPolicy
+    policies.py           # IncarPolicy, FreeRelaxIncarPolicy
   workflows/
     base.py               # WorkflowMode extension point
     eos.py                # EOSMode
     elastic.py            # ElasticMode
     param_scan.py         # ParamScanMode (INCAR parameter scan)
+    relax.py              # RelaxMode (chained free relaxations)
   clusters/
     models.py             # n-mer and ORCA configuration/result models
     generator.py          # POSCAR/CIF molecular-crystal API
@@ -88,8 +97,8 @@ VaspTools/
   scripts/
     run_param_scan.py      # CLI for one-structure parameter scan
     run_multi_scan.py      # CLI for many structures (eos/elastic)
+    run_relax_batch.py     # CLI for batch relaxation with before/after summary
     _scan_utils.py         # CLI helpers
-    _scan_runtime.py       # runtime parser helpers
   analysis/
     eos.py                # Birch-Murnaghan EOS fitting
     elastic.py            # Elastic tensor fitting and mechanical properties
@@ -97,6 +106,7 @@ VaspTools/
     incar.py              # Lightweight INCAR parser/writer and stage rules
     jobs.py               # SLURM job script rendering and sbatch helpers
     results.py            # OUTCAR/OSZICAR energy and stress parsers
+    runtime.py            # walltime parsers for OUTCAR/SLURM logs
     discovery.py          # Find prepared calculations by metadata
   execution/
     runners.py            # CalculationRunner protocol and SbatchRunner
@@ -139,6 +149,7 @@ The package depends on:
 - `numpy`
 - `scipy`
 - `pymatgen`
+- `pyyaml`
 
 For a clean environment:
 
@@ -478,6 +489,180 @@ Output CSV contains:
 - `stage`
 - parameter columns `param__volume_factor` and `param__strain` where applicable.
 
+### `run_relax_batch.py` — relax many structures and compare before/after
+
+Script for a folder of structures (`POSCAR`, `27_POSCAR`, `*.vasp`, `*.cif`).
+Each structure gets its own run folder with a chain of relaxations that run
+inside one SLURM job (`CONTCAR` of one step becomes `POSCAR` of the next).
+After the jobs finish, the script copies every final structure into one
+folder and writes a summary table.
+
+Unlike the EOS/elastic branches, this script uses `FreeRelaxIncarPolicy`:
+`ISIF`, `IBRION`, `NSW`, `EDIFFG` are taken from your `INCAR` as they are, so
+`ISIF = 3` cell relaxations are possible. Only `SYSTEM` is added.
+
+Submit:
+
+```bash
+python scripts/run_relax_batch.py \
+  --structures-dir /path/to/structures \
+  --template-dir /path/to/template \
+  --relax-steps 2 \
+  --output-csv /path/to/relax_summary.csv
+```
+
+Collect after the jobs finished:
+
+```bash
+python scripts/run_relax_batch.py \
+  --structures-dir /path/to/structures \
+  --template-dir /path/to/template \
+  --collect-only \
+  --output-csv /path/to/relax_summary.csv
+```
+
+Parameters:
+
+- `--structures-dir` — directory with structure files;
+- `--template-dir` — directory with `POTCAR`, `INCAR` and the job template;
+- `--output-root` — root for per-structure run folders (default:
+  `<template-dir>/relax_runs`);
+- `--relaxed-dir` — where final structures are collected (default:
+  `<output-root>/relaxed`);
+- `--relaxed-format` — `vasp`, `cif`, or `both` (default);
+- `--protocol` — YAML file with per-step INCAR settings (see below);
+- `--relax-steps` — number of chained relaxations per structure (default: from
+  `--protocol`, otherwise `1`);
+- `--index-start` — numeric prefix for run folders (`1000` by default);
+- `--symprec`, `--bond-tolerance` — tolerances for space-group detection and
+  molecule counting;
+- `--potcar-mode` — `hardlink` (default: shared `POTCAR` takes no extra space),
+  `copy`, or `symlink`;
+- `--collect-only` — collect existing runs only;
+- `--dry-run` — prepare only, no `sbatch`.
+
+Re-running the submit command is safe: folders whose `vasptools_run.json`
+says `submitted: true` are skipped, so you can drop new files into
+`--structures-dir` and submit only those. A failed `sbatch` is reported as
+`submit_failed` for that structure and the batch continues.
+
+Run folders:
+
+```text
+relax_runs/
+  1000_foo/
+    POSCAR                 # normalized input structure
+    vasptools_run.json     # source file name, number of steps
+    relax/
+      step_01/             # job.sh here is the SLURM driver for the whole chain
+      step_02/
+  relaxed/
+    1000_foo.vasp
+    1000_foo.cif
+```
+
+Collection uses `vasptools_run.json` in existing folders, so adding or
+removing files in `--structures-dir` afterwards does not break `--collect-only`.
+Only fully completed chains are exported to `relaxed/`; partial runs keep their
+metrics in the table. Energies and the final geometry are always read from the
+last *finished* step, never from one that is still running.
+
+Disk usage: with `--potcar-mode hardlink` each run costs only its inputs and
+VASP outputs. Put `LWAVE = .FALSE.` and `LCHARG = .FALSE.` in the template
+`INCAR` unless you need `WAVECAR`/`CHGCAR` — they dominate the footprint of a
+large batch. Replace the shared `POTCAR` with `mv`, not by editing in place,
+because hard links share the file content.
+
+Output CSV columns:
+
+- `structure_file`, `run_dir`, `job_id`, `status`, `converged`,
+  `steps_completed`, `step_names`;
+  status values: `prepared` (dry run), `submitted`, `already_submitted`,
+  `submit_failed`, `missing_outputs` (nothing started), `running` (last
+  started step has no final OUTCAR timing block: still running or killed),
+  `partial` (chain stopped between steps), `completed`;
+- `energy_initial_eV` (first `TOTEN` of step 1, i.e. the input geometry),
+  `energy_final_eV` (last `TOTEN` of the last step), `delta_energy_eV`;
+- `n_atoms`, `formula`, `n_molecules_initial`, `n_molecules_final`;
+- `space_group_initial`, `space_group_final`;
+- `volume_initial_A3`, `volume_final_A3`, `density_initial_g_cm3`,
+  `density_final_g_cm3`;
+- `runtime_sec`, `relaxed_path`.
+
+The same workflow is available from Python:
+
+```python
+from VaspTools import FreeRelaxIncarPolicy, MechanicalPipeline
+
+pipe = MechanicalPipeline.from_workdir("/path/to/run", incar_policy=FreeRelaxIncarPolicy())
+job = pipe.prepare_relax_chain(steps=2)
+pipe.submit([job])
+# later
+result = pipe.collect_relax_chain()
+```
+
+#### Per-step settings: `--protocol relax.yaml`
+
+Without a protocol every step uses the template `INCAR`. To change tags per
+step, describe the chain in a YAML file and pass it with `--protocol`; the
+number of steps is then taken from the file (`--relax-steps` is optional and
+must agree with it).
+
+```yaml
+steps:
+  - ISIF: 2          # step 1: ions only
+    NSW: 60
+    EDIFFG: -0.02
+  - ISIF: 3          # step 2: ions + cell
+    NSW: 100
+    EDIFFG: -0.005
+```
+
+Each list item is one relaxation step; its keys are INCAR tags. List as many
+tags per step as you like — anything not mentioned is inherited from the
+template `INCAR`. Steps run in order, and `CONTCAR` of a step becomes
+`POSCAR` of the next one.
+
+Optional extras:
+
+```yaml
+ENCUT: 600               # top-level keys (other than `steps`) apply to every step
+steps:
+  - name: ions           # label shown in metadata and the `step_names` CSV column
+    ISIF: 2
+  - name: cell
+    incar_file: INCAR_cell   # a file read as an INCAR (relative to --template-dir)
+    ISIF: 3                  # tags listed here win over incar_file
+    LWAVE: false             # booleans become .TRUE./.FALSE., lists become "1 2 3"
+```
+
+Precedence for one step: template `INCAR` → top-level tags → the step's
+`incar_file` → the step's own tags → `SYSTEM`. Without `name`, steps are
+called `step1`, `step2`, ... The protocol is stored in
+`vasptools_run.json` of every run, and step names appear in the `step_names`
+CSV column.
+
+```bash
+python scripts/run_relax_batch.py \
+  --structures-dir /path/to/structures \
+  --template-dir /path/to/template \
+  --protocol /path/to/template/relax.yaml \
+  --output-csv /path/to/relax_summary.csv
+```
+
+From Python:
+
+```python
+from VaspTools import FreeRelaxIncarPolicy, MechanicalPipeline, load_relax_protocol
+
+protocol = load_relax_protocol("/path/to/template/relax.yaml")
+pipe = MechanicalPipeline.from_workdir("/path/to/run", incar_policy=FreeRelaxIncarPolicy())
+pipe.submit([pipe.prepare_relax_chain(protocol=protocol)])
+
+# or without YAML:
+pipe.prepare_relax_chain(step_overrides=[{"ISIF": 2, "NSW": 60}, {"ISIF": 3, "EDIFFG": -0.005}])
+```
+
 ## API Reference
 
 ### Molecular-crystal n-mers
@@ -550,6 +735,7 @@ pipe = MechanicalPipeline.from_workdir(
     input_job_template=None,
     require_kspacing=True,
     vasp_kbar_to_gpa=-0.1,
+    potcar_mode="copy",
 )
 ```
 
@@ -565,6 +751,8 @@ Parameters:
 - `input_job_template`: explicit shell script name inside `workdir`. If `None`,
   the API auto-detects `job_template.sh`, `job.sh`, or one unambiguous `*.sh`;
 - `require_kspacing`: require `KSPACING` in `INCAR`;
+- `potcar_mode`: `copy` (default), `hardlink`, or `symlink` for the POTCAR placed
+  in every calculation directory;
 - `vasp_kbar_to_gpa`: conversion from VASP stress in kB to GPa. The default
   `-0.1` changes VASP's pressure-positive convention to tensile-positive stress.
 

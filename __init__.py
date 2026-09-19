@@ -25,6 +25,7 @@ __all__ = [
     "MoleculeExtractionConfig",
     "GeometryType",
     "ExtractionResult",
+    "FreeRelaxIncarPolicy",
     "MoleculeOccurrence",
     "SymmetryMapping",
     "SymmetryUniqueMolecule",
@@ -33,6 +34,9 @@ __all__ = [
     "PipelineConfig",
     "PipelineInputs",
     "ParamScanMode",
+    "RelaxMode",
+    "RelaxProtocol",
+    "RelaxStep",
     "SbatchRunner",
     "StrainStressPoint",
     "Submission",
@@ -41,13 +45,17 @@ __all__ = [
     "apply_strain",
     "birch_murnaghan_energy",
     "check_mechanical_stability",
+    "count_molecules",
     "discover_calculations",
+    "find_molecular_fragments",
     "fit_elastic_tensor",
     "fit_eos",
     "generate_strain_vectors",
+    "load_relax_protocol",
     "make_stage_incar",
     "mechanical_properties",
     "parse_sbatch_job_id",
+    "render_chain_job_script",
     "render_job_script",
     "render_two_stage_job_script",
     "resolve_job_template_path",
@@ -140,18 +148,24 @@ def __getattr__(name: str) -> Any:
             "EOSMode": EOSMode,
             "WorkflowMode": WorkflowMode,
         }
-    elif name == "ParamScanMode":
-        from .workflows import ParamScanMode
+    elif name in {"ParamScanMode", "RelaxMode", "RelaxProtocol", "RelaxStep", "load_relax_protocol"}:
+        from .workflows import ParamScanMode, RelaxMode, RelaxProtocol, RelaxStep, load_relax_protocol
 
-        exports = {"ParamScanMode": ParamScanMode}
+        exports = {
+            "ParamScanMode": ParamScanMode,
+            "RelaxMode": RelaxMode,
+            "RelaxProtocol": RelaxProtocol,
+            "RelaxStep": RelaxStep,
+            "load_relax_protocol": load_relax_protocol,
+        }
     elif name == "VaspCalculationFactory":
         from .core.factory import VaspCalculationFactory
 
         exports = {"VaspCalculationFactory": VaspCalculationFactory}
-    elif name == "IncarPolicy":
-        from .core.policies import IncarPolicy
+    elif name in {"IncarPolicy", "FreeRelaxIncarPolicy"}:
+        from .core.policies import FreeRelaxIncarPolicy, IncarPolicy
 
-        exports = {"IncarPolicy": IncarPolicy}
+        exports = {"IncarPolicy": IncarPolicy, "FreeRelaxIncarPolicy": FreeRelaxIncarPolicy}
     elif name in {"CalculationRunner", "SbatchRunner"}:
         from .execution.runners import CalculationRunner, SbatchRunner
 
@@ -159,6 +173,7 @@ def __getattr__(name: str) -> Any:
     elif name in {
         "Submission",
         "parse_sbatch_job_id",
+        "render_chain_job_script",
         "render_job_script",
         "render_two_stage_job_script",
         "resolve_job_template_path",
@@ -167,6 +182,7 @@ def __getattr__(name: str) -> Any:
         from .io.jobs import (
             Submission,
             parse_sbatch_job_id,
+            render_chain_job_script,
             render_job_script,
             render_two_stage_job_script,
             resolve_job_template_path,
@@ -176,6 +192,7 @@ def __getattr__(name: str) -> Any:
         exports = {
             "Submission": Submission,
             "parse_sbatch_job_id": parse_sbatch_job_id,
+            "render_chain_job_script": render_chain_job_script,
             "render_job_script": render_job_script,
             "render_two_stage_job_script": render_two_stage_job_script,
             "resolve_job_template_path": resolve_job_template_path,
@@ -192,6 +209,13 @@ def __getattr__(name: str) -> Any:
         from .io.discovery import discover_calculations
 
         exports = {"discover_calculations": discover_calculations}
+    elif name in {"count_molecules", "find_molecular_fragments"}:
+        from .molecules import count_molecules, find_molecular_fragments
+
+        exports = {
+            "count_molecules": count_molecules,
+            "find_molecular_fragments": find_molecular_fragments,
+        }
     elif name in {
         "apply_strain",
         "generate_strain_vectors",

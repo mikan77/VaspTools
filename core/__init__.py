@@ -6,6 +6,7 @@ from typing import Any
 
 __all__ = [
     "Calculation",
+    "FreeRelaxIncarPolicy",
     "IncarPolicy",
     "MechanicalPipeline",
     "PipelineConfig",
@@ -31,10 +32,10 @@ def __getattr__(name: str) -> Any:
         from .factory import VaspCalculationFactory
 
         exports = {"VaspCalculationFactory": VaspCalculationFactory}
-    elif name == "IncarPolicy":
-        from .policies import IncarPolicy
+    elif name in {"IncarPolicy", "FreeRelaxIncarPolicy"}:
+        from .policies import FreeRelaxIncarPolicy, IncarPolicy
 
-        exports = {"IncarPolicy": IncarPolicy}
+        exports = {"IncarPolicy": IncarPolicy, "FreeRelaxIncarPolicy": FreeRelaxIncarPolicy}
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

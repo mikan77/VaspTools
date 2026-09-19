@@ -26,6 +26,45 @@ def parse_energy_from_outcar(text: str) -> float:
     return float(matches[-1])
 
 
+def parse_first_energy_from_outcar(text: str) -> float:
+    """Return the first TOTEN energy in eV from OUTCAR text.
+
+    For a relaxation this is the energy of the initial geometry.
+    """
+
+    matches = re.findall(
+        rf"free\s+energy\s+TOTEN\s+=\s*({FLOAT_RE})",
+        text,
+    )
+    if not matches:
+        raise ValueError("No TOTEN energy found in OUTCAR.")
+    return float(matches[0])
+
+
+def parse_first_energy_from_oszicar(text: str) -> float:
+    """Return the first free energy in eV from OSZICAR text."""
+
+    matches = re.findall(rf"\bF=\s*({FLOAT_RE})", text)
+    if not matches:
+        raise ValueError("No F= energy found in OSZICAR.")
+    return float(matches[0])
+
+
+def outcar_reached_required_accuracy(text: str) -> bool:
+    """Return True if VASP reported ionic convergence in OUTCAR text."""
+
+    return "reached required accuracy" in text
+
+
+def outcar_finished(text: str) -> bool:
+    """Return True if VASP wrote its final timing block, i.e. the run ended normally.
+
+    A killed or still-running calculation has an OUTCAR without this block.
+    """
+
+    return "General timing and accounting" in text
+
+
 def parse_energy_from_oszicar(text: str) -> float:
     """Return the final free energy in eV from OSZICAR text."""
 
@@ -48,6 +87,39 @@ def read_energy(directory: str | Path) -> float:
         return parse_energy_from_oszicar(oszicar.read_text(errors="ignore"))
 
     raise FileNotFoundError(f"No OUTCAR or OSZICAR found in {directory}.")
+
+
+def read_initial_energy(directory: str | Path) -> float:
+    """Read the first ionic-step energy from OUTCAR or OSZICAR."""
+
+    directory = Path(directory)
+    outcar = directory / "OUTCAR"
+    if outcar.exists():
+        return parse_first_energy_from_outcar(outcar.read_text(errors="ignore"))
+
+    oszicar = directory / "OSZICAR"
+    if oszicar.exists():
+        return parse_first_energy_from_oszicar(oszicar.read_text(errors="ignore"))
+
+    raise FileNotFoundError(f"No OUTCAR or OSZICAR found in {directory}.")
+
+
+def read_finished(directory: str | Path) -> bool | None:
+    """Return True if OUTCAR shows a normally finished run, None if OUTCAR is missing."""
+
+    outcar = Path(directory) / "OUTCAR"
+    if not outcar.exists():
+        return None
+    return outcar_finished(outcar.read_text(errors="ignore"))
+
+
+def read_converged(directory: str | Path) -> bool | None:
+    """Return ionic convergence flag from OUTCAR, or None if OUTCAR is missing."""
+
+    outcar = Path(directory) / "OUTCAR"
+    if not outcar.exists():
+        return None
+    return outcar_reached_required_accuracy(outcar.read_text(errors="ignore"))
 
 
 def read_volume(directory: str | Path) -> float:
