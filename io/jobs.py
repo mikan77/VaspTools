@@ -132,11 +132,11 @@ def render_two_stage_job_script(
         f'RELAX_STAGE="$SCRIPT_DIR"/{relax_script_token}',
         f'STATIC_STAGE="$STATIC_DIR"/{static_script_token}',
         "",
-        '(cd "$SCRIPT_DIR" && bash -e "$RELAX_STAGE")',
+        '(cd "$SCRIPT_DIR" && SLURM_SUBMIT_DIR="$SCRIPT_DIR" bash -e "$RELAX_STAGE")',
         'test -s "$SCRIPT_DIR/CONTCAR"',
         'test -d "$STATIC_DIR"',
         'cp "$SCRIPT_DIR/CONTCAR" "$STATIC_DIR/POSCAR"',
-        '(cd "$STATIC_DIR" && bash -e "$STATIC_STAGE")',
+        '(cd "$STATIC_DIR" && SLURM_SUBMIT_DIR="$STATIC_DIR" bash -e "$STATIC_STAGE")',
         "",
     ]
     return "\n".join(driver)
@@ -186,7 +186,8 @@ def render_chain_job_script(
         dir_token = shlex.quote(directory)
         script_token = shlex.quote(script)
         driver.append(f'STAGE_DIR="$SCRIPT_DIR"/{dir_token}')
-        driver.append(f'(cd "$STAGE_DIR" && bash -e "$STAGE_DIR"/{script_token})')
+        # Templates often `cd "$SLURM_SUBMIT_DIR"`; point it at the stage directory.
+        driver.append(f'(cd "$STAGE_DIR" && SLURM_SUBMIT_DIR="$STAGE_DIR" bash -e "$STAGE_DIR"/{script_token})')
         if index + 1 < len(stage_dirs):
             next_token = shlex.quote(stage_dirs[index + 1])
             driver.append('test -s "$STAGE_DIR/CONTCAR"')

@@ -138,8 +138,9 @@ class RelaxModeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             inputs = write_basic_inputs(root)
+            # A typical cluster template: it cd's to $SLURM_SUBMIT_DIR itself.
             inputs.job_template.write_text(
-                "#!/bin/bash\n#SBATCH --job-name={job_name}\n"
+                "#!/bin/bash\n#SBATCH --job-name={job_name}\ncd \"$SLURM_SUBMIT_DIR\"\n"
                 "printf 'free  energy   TOTEN  = -1.0 eV\\n' > OUTCAR\ncp POSCAR CONTCAR\n",
                 encoding="utf-8",
             )
@@ -164,6 +165,7 @@ class RelaxModeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             step_02 = pipe.relax.step_directory(2)
             self.assertTrue((step_02 / "OUTCAR").exists())
+            self.assertTrue((step_02 / "CONTCAR").exists())  # step 2 really ran in its own folder
             self.assertEqual((step_02 / "POSCAR").read_text(), (calc.directory / "CONTCAR").read_text())
 
             # Without SLURM (plain `bash job.sh`) the script location is used.
