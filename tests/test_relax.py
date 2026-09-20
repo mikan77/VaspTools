@@ -143,7 +143,11 @@ class RelaxModeTests(unittest.TestCase):
                 "printf 'free  energy   TOTEN  = -1.0 eV\\n' > OUTCAR\ncp POSCAR CONTCAR\n",
                 encoding="utf-8",
             )
-            pipe = self._pipeline(root)
+            pipe = MechanicalPipeline(
+                inputs,
+                PipelineConfig(workdir=root / "run", name="test"),
+                incar_policy=FreeRelaxIncarPolicy(),
+            )
             calc = pipe.relax.prepare(steps=2)
 
             spool = root / "spool" / "job123"
