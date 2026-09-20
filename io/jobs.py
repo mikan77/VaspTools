@@ -120,7 +120,14 @@ def render_two_stage_job_script(
         *directives,
         "",
         "set -euo pipefail",
-        'SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+        # sbatch copies the script to /var/spool/slurmd/jobNNN/, so BASH_SOURCE
+        # does not point at the calculation directory; SLURM_SUBMIT_DIR does
+        # (submit_sbatch runs `sbatch job.sh` from inside that directory).
+        'if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then',
+        '    SCRIPT_DIR="$SLURM_SUBMIT_DIR"',
+        'else',
+        '    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+        'fi',
         f'STATIC_DIR="$SCRIPT_DIR"/{static_token}',
         f'RELAX_STAGE="$SCRIPT_DIR"/{relax_script_token}',
         f'STATIC_STAGE="$STATIC_DIR"/{static_script_token}',
@@ -165,7 +172,14 @@ def render_chain_job_script(
         *directives,
         "",
         "set -euo pipefail",
-        'SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+        # sbatch copies the script to /var/spool/slurmd/jobNNN/, so BASH_SOURCE
+        # does not point at the calculation directory; SLURM_SUBMIT_DIR does
+        # (submit_sbatch runs `sbatch job.sh` from inside that directory).
+        'if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then',
+        '    SCRIPT_DIR="$SLURM_SUBMIT_DIR"',
+        'else',
+        '    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+        'fi',
         "",
     ]
     for index, (directory, script) in enumerate(zip(stage_dirs, stage_scripts)):

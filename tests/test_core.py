@@ -357,6 +357,27 @@ fi
             )
             self.assertTrue((static_directory / "OUTCAR").exists())
 
+            # sbatch runs a copy of the script from its spool directory; the driver
+            # must still find the calculation through SLURM_SUBMIT_DIR.
+            import os
+            import shutil
+
+            (static_directory / "OUTCAR").unlink()
+            (calculation.directory / "CONTCAR").unlink()
+            spool = root / "spool"
+            spool.mkdir()
+            shutil.copy(calculation.directory / "job.sh", spool / "slurm_script")
+            completed = subprocess.run(
+                ["bash", str(spool / "slurm_script")],
+                cwd=calculation.directory,
+                env={**os.environ, "SLURM_SUBMIT_DIR": str(calculation.directory)},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue((static_directory / "OUTCAR").exists())
+
     def test_relaxation_only_mode_keeps_legacy_two_step_flow(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

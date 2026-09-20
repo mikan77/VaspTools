@@ -128,6 +128,50 @@ class RelaxModeTests(unittest.TestCase):
             self.assertEqual(pipe.relax.collect()["status"], "missing_outputs")
             self.assertEqual(pipe.submit([calc], dry_run=True)[0].command, ("sbatch", "job.sh"))
 
+    def test_driver_runs_from_slurm_spool_directory(self):
+        """sbatch executes a copy of job.sh elsewhere; SLURM_SUBMIT_DIR must locate the run."""
+
+        import os
+        import shutil
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inputs = write_basic_inputs(root)
+            inputs.job_template.write_text(
+                "#!/bin/bash\n#SBATCH --job-name={job_name}\n"
+                "printf 'free  energy   TOTEN  = -1.0 eV\\n' > OUTCAR\ncp POSCAR CONTCAR\n",
+                encoding="utf-8",
+            )
+            pipe = self._pipeline(root)
+            calc = pipe.relax.prepare(steps=2)
+
+            spool = root / "spool" / "job123"
+            spool.mkdir(parents=True)
+            shutil.copy(calc.directory / "job.sh", spool / "slurm_script")
+            env = {**os.environ, "SLURM_SUBMIT_DIR": str(calc.directory)}
+            completed = subprocess.run(
+                ["bash", str(spool / "slurm_script")],
+                cwd=calc.directory,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            step_02 = pipe.relax.step_directory(2)
+            self.assertTrue((step_02 / "OUTCAR").exists())
+            self.assertEqual((step_02 / "POSCAR").read_text(), (calc.directory / "CONTCAR").read_text())
+
+            # Without SLURM (plain `bash job.sh`) the script location is used.
+            env.pop("SLURM_SUBMIT_DIR")
+            for path in (calc.directory / "OUTCAR", calc.directory / "CONTCAR", step_02 / "OUTCAR", step_02 / "CONTCAR"):
+                path.unlink()
+            completed = subprocess.run(
+                ["bash", str(calc.directory / "job.sh")], cwd=root, env=env, text=True, capture_output=True
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue((step_02 / "OUTCAR").exists())
+
     def test_collect_reads_first_and_last_energies(self):
         with tempfile.TemporaryDirectory() as tmp:
             pipe = self._pipeline(Path(tmp))
